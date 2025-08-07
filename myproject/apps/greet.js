@@ -38,6 +38,24 @@ export class Greet extends plugin {
    * 插件的构造函数，用于初始化插件的名称、描述、事件和规则。
    */
   constructor () {
+    // 防止重复实例化
+    if (Greet.instance) {
+      console.log('[定时问候] 检测到重复实例化，清理旧实例的定时器。');
+      const oldInstance = Greet.instance;
+      if (oldInstance.scanInterval) {
+        clearInterval(oldInstance.scanInterval);
+        oldInstance.scanInterval = null;
+      }
+      if (oldInstance.hourlyInterval) {
+        clearInterval(oldInstance.hourlyInterval);
+        oldInstance.hourlyInterval = null;
+      }
+      if (oldInstance.heartbeatInterval) {
+        clearInterval(oldInstance.heartbeatInterval);
+        oldInstance.heartbeatInterval = null;
+      }
+    }
+    
     super({
       name: '定时问候', // 插件名称
       dsc: '定时向指定用户发送问候消息', // 插件描述
@@ -59,8 +77,20 @@ export class Greet extends plugin {
     })
 
     
-    this.interval = null // 用于存储 setInterval 的句柄，以便后续清除定时器
+    this.scanInterval = null // 用于存储 45秒扫描定时器的句柄
+    this.hourlyInterval = null // 用于存储每小时更新定时器的句柄
     this.bot = null // 用于存储机器人实例，以便发送消息
+    
+    // 全局问候消息模板
+    this.greetingMessageTemplate = `【system】现在的时间是：{currentTime}，触发了主动聊天事件。（这条消息不用发表情和定时命令）
+      接下来的情景是你要假扮在主动找我聊天，你可以像真人一样根据现在的时间和在做什么情况来主动给我发送消息
+      （如：熬夜的时间可以说是在加班，半夜的时间可以说是失眠或者起夜上厕所之类的）。
+      可以是询问之前的聊天内容，或者吐槽学习生活或工作，或者问候吃没吃饭自己吃的什么饭，或者早晚安，或者单纯的一句打招呼都可以
+      （你不知道对方在做什么的情况下，这次是你主动地问候一下，而不是对方找你）。
+      如果上次的消息没有被回复一定要问一下对话人在做什么。
+      尽量做到有感情色彩，按照多姿多彩的生活来问候。
+      如果在和对话人的正常聊天的过程中触发了主动聊天，可以讲一些题外话（比如说：对了，上次xxxxxx）。`
+    
     this.configFile = path.join(__dirname, 'greet_config.json') // 用户配置路径，保存在代码同目录
     this.userConfigs = {} // 用户配置缓存
     this.loadConfig() // 加载用户配置文件
@@ -68,14 +98,13 @@ export class Greet extends plugin {
     this.logFile = path.join(__dirname, 'greet_log.json') // 日志文件路径
     this.runConfigFile = path.join(__dirname, 'greet_run.json') // 运行配置（调度计划）文件路径
     this.runConfig = {} // 运行配置缓存
-    this.scheduledTimeout = null // 用于存储 setTimeout 的句柄，以便清除本小时的具体问候定时器
     this.loadRunConfig() // 加载运行配置文件
 
-    // 添加心跳日志，每10秒输出一次证明程序正在运行
+    // 添加心跳日志，每45秒输出一次证明程序正在运行
     this.heartbeatInterval = setInterval(() => {
       const enabledUsersCount = Object.values(this.userConfigs).filter(status => status === 'on').length;
-      console.log(`[定时问候-心跳] ${new Date().toLocaleString('zh-CN')} | 运行状态: 正常 | 开启用户数: ${enabledUsersCount} | 全局定时器: ${this.interval ? '运行中' : '未启动'} | 当前调度: ${this.scheduledTimeout ? '已安排' : '无'}`);
-    }, 10000) // 每10秒执行一次
+      console.log(`[定时问候-心跳] ${new Date().toLocaleString('zh-CN')} | 运行状态: 正常 | 开启用户数: ${enabledUsersCount} | 扫描定时器: ${this.scanInterval ? '运行中' : '未启动'} | 每小时定时器: ${this.hourlyInterval ? '运行中' : '未启动'}`);
+    }, 45000) // 每45秒执行一次
 
     // 绑定方法，确保 'this' 上下文正确
     this.startGreeting = this.startGreeting.bind(this);
@@ -86,11 +115,60 @@ export class Greet extends plugin {
     this.isUserEnabled = this.isUserEnabled.bind(this);
     this.setUserStatus = this.setUserStatus.bind(this);
     this.addLogEntry = this.addLogEntry.bind(this);
-    this.loadRunConfig = this.loadRunConfig.bind(this); // 绑定新的方法
-    this.saveRunConfig = this.saveRunConfig.bind(this); // 绑定新的方法
-    this.scheduleHourlyGreeting = this.scheduleHourlyGreeting.bind(this); // 绑定新的方法
-    this.executeScheduledGreeting = this.executeScheduledGreeting.bind(this); // 绑定新的方法
-    this.formatToUTCPlus8 = this.formatToUTCPlus8.bind(this); // 绑定新的辅助函数
+    this.loadRunConfig = this.loadRunConfig.bind(this);
+    this.saveRunConfig = this.saveRunConfig.bind(this);
+    this.scanAndExecuteGreeting = this.scanAndExecuteGreeting.bind(this); // 新的扫描执行方法
+    this.generateNextHourGreetingTime = this.generateNextHourGreetingTime.bind(this); // 新的生成下个小时时间方法
+    this.updateHourlyGreetingTime = this.updateHourlyGreetingTime.bind(this); // 新的每小时更新方法
+    this.formatToUTCPlus8 = this.formatToUTCPlus8.bind(this);
+
+    // 机器人启动时自动启动定时器系统
+    this.initializeTimerSystem();
+    
+    // 设置单例实例引用
+    Greet.instance = this;
+  }
+
+  /**
+   * 初始化定时器系统
+   */
+  async initializeTimerSystem() {
+    console.log('[定时问候] 机器人启动 - 自动初始化定时器系统。');
+    
+    // 立即生成本小时的问候计划
+    await this.updateHourlyGreetingTime();
+
+    // 启动每50秒的扫描定时器
+    this.scanInterval = setInterval(async () => {
+      await this.scanAndExecuteGreeting();
+    }, 50000); // 每50秒执行一次
+    console.log('[定时问候] 50秒扫描定时器已启动。');
+
+    // 计算到下一个整点的时间
+    const now = new Date();
+    const nextFullHour = new Date(now);
+    nextFullHour.setHours(now.getHours() + 1);
+    nextFullHour.setMinutes(0);
+    nextFullHour.setSeconds(0);
+    nextFullHour.setMilliseconds(0);
+    const initialDelay = nextFullHour.getTime() - now.getTime();
+
+    console.log(`[定时问候] 首次每小时更新将在 ${nextFullHour.toLocaleString('zh-CN')} 进行（${Math.round(initialDelay / 1000)} 秒后）。`);
+
+    // 设置首次每小时更新
+    setTimeout(() => {
+      console.log('[定时问候] 首次每小时更新触发。');
+      this.updateHourlyGreetingTime();
+      
+      // 启动每小时的定时器
+      this.hourlyInterval = setInterval(async () => {
+        console.log('[定时问候] 每小时更新定时器触发。');
+        await this.updateHourlyGreetingTime();
+      }, 3600000); // 每小时执行一次
+      console.log('[定时问候] 每小时更新定时器已启动。');
+    }, initialDelay);
+    
+    console.log('[定时问候] 定时器系统初始化完成。');
   }
 
   /**
@@ -135,7 +213,11 @@ export class Greet extends plugin {
       if (fs.existsSync(this.runConfigFile)) {
         const data = fs.readFileSync(this.runConfigFile, 'utf8')
         this.runConfig = JSON.parse(data)
-        console.log('[定时问候] 运行配置加载成功：', this.runConfig)
+        // 浓缩日志格式
+        const timestamp = this.runConfig.timestamp || '未设置';
+        const shouldSend = this.runConfig.shouldSend ? '是' : '否';
+        const nextGreetingTime = this.runConfig.nextGreetingTime || '未设置';
+        console.log(`=== 定时问候 ===\n运行时间：${timestamp} | 是否发送：${shouldSend} | 下次问候：${nextGreetingTime}`)
       } else {
         this.runConfig = {}
         this.saveRunConfig()
@@ -179,6 +261,25 @@ export class Greet extends plugin {
   }
 
   /**
+   * 生成下个小时的随机问候时间
+   * @returns {Date} 下个小时的随机时间
+   */
+  generateNextHourGreetingTime() {
+    const now = new Date();
+    const nextHour = new Date(now);
+    nextHour.setHours(now.getHours() + 1);
+    
+    // 生成随机分钟数（1-59）
+    const randomMinute = Math.floor(Math.random() * 59) + 1;
+    nextHour.setMinutes(randomMinute);
+    nextHour.setSeconds(0);
+    nextHour.setMilliseconds(0);
+    
+    console.log(`[定时问候] 生成下个小时随机时间: ${nextHour.toLocaleString('zh-CN')}`);
+    return nextHour;
+  }
+
+  /**
    * 检查指定用户是否已开启定时问候
    * @param {string} userId 用户ID
    * @returns {boolean} 是否开启
@@ -187,6 +288,157 @@ export class Greet extends plugin {
     const isEnabled = this.userConfigs[userId] === 'on'
     console.log(`[定时问候] 检查用户 ${userId} 状态：${isEnabled ? '已开启' : '未开启'}`)
     return isEnabled
+  }
+
+  /**
+   * 每50秒扫描并执行问候任务
+   */
+  async scanAndExecuteGreeting() {
+    // 自动获取机器人实例（如果还没有的话）
+    if (!this.bot) {
+      try {
+        // 尝试从全局获取机器人实例
+        if (typeof Bot !== 'undefined' && Bot.uin) {
+          this.bot = Bot;
+          console.log('[定时问候] 自动获取到机器人实例。');
+        } else {
+          console.log('[定时问候] 机器人实例未就绪，跳过扫描。');
+          return;
+        }
+      } catch (error) {
+        console.log('[定时问候] 获取机器人实例失败，跳过扫描。');
+        return;
+      }
+    }
+
+    // 重新加载运行配置，确保使用最新状态
+    this.loadRunConfig();
+    
+    if (!this.runConfig.shouldSend || !this.runConfig.nextGreetingTime) {
+      console.log('[定时问候] 无问候计划或时间未设置，跳过扫描。');
+      return;
+    }
+
+    const now = new Date();
+    const scheduledTime = new Date(this.runConfig.nextGreetingTime);
+    
+    // 检查当前时间的分钟是否匹配
+    if (now.getHours() === scheduledTime.getHours() && now.getMinutes() === scheduledTime.getMinutes()) {
+      console.log(`[定时问候] 时间匹配！当前时间: ${now.toLocaleString('zh-CN')}, 计划时间: ${scheduledTime.toLocaleString('zh-CN')}`);
+      
+      // 执行问候
+      await this.executeGreetingToAllUsers();
+      
+      // 立即更新为下个小时的随机时间
+      const nextGreetingTime = this.generateNextHourGreetingTime();
+      this.runConfig.nextGreetingTime = this.formatToUTCPlus8(nextGreetingTime);
+      this.runConfig.timestamp = this.formatToUTCPlus8(now);
+      this.runConfig.hour = nextGreetingTime.getHours();
+      this.runConfig.randomMinute = nextGreetingTime.getMinutes();
+      this.saveRunConfig();
+      
+      console.log(`[定时问候] 已更新下次问候时间为: ${nextGreetingTime.toLocaleString('zh-CN')}`);
+    }
+  }
+
+  /**
+   * 向所有开启用户执行问候
+   */
+  async executeGreetingToAllUsers() {
+    console.log('[定时问候] 开始向所有用户发送问候。');
+    
+    const enabledUsers = Object.keys(this.userConfigs).filter(userId => this.userConfigs[userId] === 'on');
+    if (enabledUsers.length === 0) {
+      console.log('[定时问候] 没有用户开启，跳过问候发送。');
+      return;
+    }
+
+    const nowForMessage = new Date();
+    const currentTime = nowForMessage.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    const greetingMessage = this.greetingMessageTemplate.replace('{currentTime}', currentTime);
+    for (const userId of enabledUsers) {
+      await this.sendActualGreeting(userId, greetingMessage);
+      console.log(`[定时问候] 已向用户 ${userId} 发送定时问候。`);
+      this.addLogEntry({
+        type: 'greeting',
+        action: 'scheduledGreetingSent',
+        userId: userId,
+        messageContent: greetingMessage,
+        sentAt: this.formatToUTCPlus8(new Date())
+      });
+    }
+    console.log('[定时问候] 所有用户问候发送完毕。');
+  }
+
+  /**
+   * 每小时更新问候时间（概率判断）
+   */
+  async updateHourlyGreetingTime() {
+    console.log('[定时问候] === 每小时更新任务开始 ===');
+    
+    const now = new Date();
+    const currentHour = now.getHours();
+    let shouldSend = false;
+    let probability = 0;
+
+    // 根据时间段确定概率
+    if (currentHour >= 9 && currentHour < 20) {
+      probability = 0.35;
+      shouldSend = Math.random() < probability;
+      console.log(`[定时问候] 当前小时 ${currentHour} 处于 9-20点时间段，概率 ${probability * 100}%。`);
+    }
+    else if ((currentHour >= 6 && currentHour < 8) || (currentHour >= 20 && currentHour < 24)) {
+      probability = 0.85;
+      shouldSend = Math.random() < probability;
+      console.log(`[定时问候] 当前小时 ${currentHour} 处于 6-8点或20-24点时间段，概率 ${probability * 100}%。`);
+    }
+    else if (currentHour >= 0 && currentHour < 6) { 
+      probability = 0.15;
+      shouldSend = Math.random() < probability;
+      console.log(`[定时问候] 当前小时 ${currentHour} 处于 0-6点时间段，概率 ${probability * 100}%。`);
+    } else {
+      console.log(`[定时问候] 当前小时 ${currentHour} 不在任何预设问候时间段内，不发送问候。`);
+      shouldSend = false;
+    }
+
+    // 生成这个小时的随机分钟数
+    let randomMinute = shouldSend ? Math.floor(Math.random() * 59) + 1 : 0;
+    
+    const scheduledTime = new Date();
+    scheduledTime.setHours(currentHour);
+    scheduledTime.setMinutes(randomMinute);
+    scheduledTime.setSeconds(0);
+    scheduledTime.setMilliseconds(0);
+
+    // 如果计划时间已经过去，则安排到下一个小时
+    if (scheduledTime.getTime() <= now.getTime()) {
+      scheduledTime.setHours(currentHour + 1);
+      console.log(`[定时问候] 原定时间已过，调整到下一小时：${scheduledTime.toLocaleString('zh-CN')}`);
+    }
+
+    // 更新运行配置
+    this.runConfig = {
+      timestamp: this.formatToUTCPlus8(now),
+      randomMinute: scheduledTime.getMinutes(),
+      shouldSend: shouldSend,
+      hour: scheduledTime.getHours(),
+      nextGreetingTime: shouldSend ? this.formatToUTCPlus8(scheduledTime) : null
+    };
+
+    this.addLogEntry({
+      type: 'probabilityCheck',
+      userId: 'global',
+      hour: currentHour,
+      randomMinute: randomMinute,
+      probability: probability,
+      passed: shouldSend,
+      scheduled: shouldSend,
+      currentTime: this.formatToUTCPlus8(now)
+    });
+
+    this.saveRunConfig();
+    console.log(`[定时问候] 本小时问候计划: ${shouldSend ? `将在 ${scheduledTime.toLocaleString('zh-CN')} 发送问候` : '不发送问候'}`);
+    console.log('[定时问候] === 每小时更新任务结束 ===');
   }
 
   /**
@@ -206,87 +458,39 @@ export class Greet extends plugin {
    */
   async startGreeting (e) {
     const userId = e.sender.user_id.toString()
-    this.bot = e.bot
+    this.bot = e.bot // 更新机器人实例
     const wasEnabled = this.isUserEnabled(userId);
 
     // 设置用户状态为开启
     this.setUserStatus(userId, 'on')
     console.log(`[定时问候] 用户 ${userId} 发送 #开启定时问候 命令。`)
 
-    // 立即为当前发送命令的用户发送一条问候 (无视其他条件)
-    const nowForMessage = new Date()
-    const currentTime = nowForMessage.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-    const greetingMessage = `【system】现在的时间是：${currentTime}，触发了主动聊天事件。
-接下来的情景是你要假扮在主动找我聊天，你可以像真人一样根据现在的时间和在做什么情况来主动给我发送消息
-（如：熬夜的时间可以说是在加班，半夜的时间可以说是失眠或者起夜上厕所之类的）。
-可以是询问之前的聊天内容，或者吐槽学习生活或工作，或者问候吃没吃饭自己吃的什么饭，或者早晚安，或者单纯的一句打招呼都可以
-（你不知道对方在做什么的情况下，这次是你主动地问候一下，而不是对方找你）。
-如果上次的消息没有被回复一定要问一下对话人在做什么。
-尽量做到有感情色彩，按照多姿多彩的生活来问候。
-如果在和对话人的正常聊天的过程中触发了主动聊天，可以讲一些题外话（比如说：对了，上次xxxxxx）。`
-    await this.sendActualGreeting(userId, greetingMessage)
-    console.log(`[定时问候] 已向用户 ${userId} 立即发送问候 (通过 startGreeting 命令触发)。`)
-    this.addLogEntry({
-      type: 'greeting',
-      action: 'immediateGreeting',
-      userId: userId,
-      messageContent: greetingMessage,
-      sentAt: this.formatToUTCPlus8(new Date()) // 保存为UTC+8时间
-    })
+    // 立即为当前发送命令的用户发送一条问候 (无视其他条件) - 已注释
+    // const nowForMessage = new Date()
+    // const currentTime = nowForMessage.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    // const greetingMessage = this.greetingMessageTemplate.replace('{currentTime}', currentTime);
+    // await this.sendActualGreeting(userId, greetingMessage)
+    // console.log(`[定时问候] 已向用户 ${userId} 立即发送问候 (通过 startGreeting 命令触发)。`)
+    // this.addLogEntry({
+    //   type: 'greeting',
+    //   action: 'immediateGreeting',
+    //   userId: userId,
+    //   messageContent: greetingMessage,
+    //   sentAt: this.formatToUTCPlus8(new Date()) // 保存为UTC+8时间
+    // })
 
-    // 如果是第一个开启的用户，启动全局定时器
-    if (!this.interval) {
-      console.log('[定时问候] 未找到全局定时器，正在初始化机器人实例并启动定时器。')
-      console.log('[定时问候] 全局定时器启动。')
-
-      // 立即触发一次调度，填充 greet_run.json
-      this.scheduleHourlyGreeting(); 
-
-      // 计算到下一个整点0分0秒的毫秒数
-      const now = new Date();
-      const nextFullHour = new Date(now);
-      nextFullHour.setHours(now.getHours() + 1);
-      nextFullHour.setMinutes(0);
-      nextFullHour.setSeconds(0);
-      nextFullHour.setMilliseconds(0);
-      const initialDelay = nextFullHour.getTime() - now.getTime();
-
-      console.log(`[定时问候] 首次每小时调度将在 ${nextFullHour.toLocaleTimeString('zh-CN')} 进行（${initialDelay / 1000} 秒后）。`);
-
-      // 设置每小时执行一次的主定时器，在`initialDelay`后首次触发
-      let initialTimeout = setTimeout(() => {
-          console.log('[定时问候] 全局每小时定时器触发（通过 setTimeout）。');
-          this.scheduleHourlyGreeting(); // 触发本小时调度
-
-          // 启动每小时的循环定时器
-          this.interval = setInterval(async () => {
-              console.log('[定时问候] 全局每小时定时器触发（通过 setInterval）。');
-              this.scheduleHourlyGreeting(); // 每个小时开始时安排随机问候
-          }, 3600000); // 每小时执行一次 (3600秒 * 1000毫秒/秒)
-          console.log('[定时问候] 全局定时器已成功启动。');
-      }, initialDelay);
-      
-      // 保存初始定时器引用，用于清理
-      this.initialTimeout = initialTimeout;
-    } else {
-      console.log('[定时问候] 全局定时器已在运行中。')
-    }
-
-    // 计算并输出下一次每小时调度的时间 (仅为信息提示，实际调度由定时器控制)
+    // 显示下次问候时间
     let nextScheduledTimeDisplay = "下次问候时间将根据每小时随机确定";
-    // 从 greet_run.json 中读取下一次问候时间
     this.loadRunConfig(); // 确保加载最新配置
     if (this.runConfig.shouldSend && this.runConfig.nextGreetingTime) {
         const scheduledDate = new Date(this.runConfig.nextGreetingTime);
-        nextScheduledTimeDisplay = `下次问候预计时间为：${scheduledDate.toLocaleTimeString('zh-CN')}。`;
+        nextScheduledTimeDisplay = `下次问候预计时间为：${scheduledDate.toLocaleString('zh-CN')}。`;
     }
 
     if (wasEnabled) {
-      e.reply(`您已经开启了定时问候功能，并已发送一次问候。
-问候将继续按照时间表进行。${nextScheduledTimeDisplay}`, true)
+      e.reply(`您已经开启了定时问候功能。`, true)
     } else {
-      e.reply(`定时问候已开启，将根据时间表进行问候。
-已发送一次问候。${nextScheduledTimeDisplay}`, true)
+      e.reply(`定时问候已开启`, true)
     }
     console.log(`[定时问候] 用户 ${userId} 已成功处理开启命令。`)
   }
@@ -312,39 +516,36 @@ export class Greet extends plugin {
     const enabledUsers = Object.values(this.userConfigs).filter(status => status === 'on')
     console.log(`[定时问候] 剩余开启用户数：${enabledUsers.length}`)
     
-    if (enabledUsers.length === 0) {
-      // 如果没有用户开启，停止全局定时器
-      if (this.interval) {
-        clearInterval(this.interval) // 清除定时器
-        this.interval = null // 将定时器句柄设为null
-        console.log('[定时问候] 全局定时器已停止 - 无用户开启。')
-      }
-      // 清除初始定时器
-      if (this.initialTimeout) {
-        clearTimeout(this.initialTimeout);
-        this.initialTimeout = null;
-        console.log('[定时问候] 清除了初始定时器。');
-      }
-      // 清除本小时的具体问候调度
-      if (this.scheduledTimeout) {
-        clearTimeout(this.scheduledTimeout);
-        this.scheduledTimeout = null;
-        console.log('[定时问候] 清除了当前小时的问候调度。');
-      }
-      // 清除心跳定时器
-      if (this.heartbeatInterval) {
-        clearInterval(this.heartbeatInterval);
-        this.heartbeatInterval = null;
-        console.log('[定时问候] 清除了心跳日志定时器。');
-      }
-      this.bot = null // 清除机器人实例
-      // 清空运行配置文件
-      this.runConfig = {};
-      this.saveRunConfig();
-      console.log('[定时问候] greet_run.json 已清空。');
-    } else {
-      console.log('[定时问候] 全局定时器仍在运行，因为仍有其他用户开启。')
-    }
+    // 注意：定时器系统保持运行，只是不会给关闭的用户发送消息
+    // 如果需要完全停止系统，可以取消下面的注释
+    // if (enabledUsers.length === 0) {
+    //   // 如果没有用户开启，停止所有定时器
+    //   if (this.scanInterval) {
+    //     clearInterval(this.scanInterval);
+    //     this.scanInterval = null;
+    //     console.log('[定时问候] 50秒扫描定时器已停止。');
+    //   }
+    //   if (this.hourlyInterval) {
+    //     clearInterval(this.hourlyInterval);
+    //     this.hourlyInterval = null;
+    //     console.log('[定时问候] 每小时更新定时器已停止。');
+    //   }
+    //   // 清除心跳定时器
+    //   if (this.heartbeatInterval) {
+    //     clearInterval(this.heartbeatInterval);
+    //     this.heartbeatInterval = null;
+    //     console.log('[定时问候] 清除了心跳日志定时器。');
+    //   }
+    //   this.bot = null // 清除机器人实例
+    //   // 清空运行配置文件
+    //   this.runConfig = {};
+    //   this.saveRunConfig();
+    //   console.log('[定时问候] greet_run.json 已清空。');
+    // } else {
+    //   console.log('[定时问候] 定时器系统仍在运行，因为仍有其他用户开启。')
+    // }
+    
+    console.log('[定时问候] 定时器系统继续运行，但不会向您发送问候。');
     e.reply('定时问候已关闭', true) // 回复用户定时任务已关闭
     console.log(`[定时问候] 用户 ${userId} 的定时问候已成功关闭。`)
   }
@@ -386,182 +587,7 @@ export class Greet extends plugin {
     }
   }
 
-  /**
-   * 每小时调度问候任务 (在每个小时的00分触发)
-   */
-  async scheduleHourlyGreeting () {
-    console.log('[定时问候] === 每小时调度任务触发开始 ===');
-    console.log(`[定时问候] 当前时间: ${new Date().toLocaleString('zh-CN')}`);
-    console.log(`[定时问候] interval状态: ${this.interval ? '运行中' : '未运行'}`);
-    console.log(`[定时问候] scheduledTimeout状态: ${this.scheduledTimeout ? '运行中' : '未运行'}`);
-    
-    if (!this.bot) {
-        console.error("[定时问候] 机器人实例未设置，无法安排问候消息。");
-        return;
-    }
-
-    const enabledUsers = Object.keys(this.userConfigs).filter(userId => this.userConfigs[userId] === 'on');
-    if (enabledUsers.length === 0) {
-      console.log('[定时问候] 没有用户开启，跳过问候安排。');
-      this.runConfig = {}; // 清空运行配置
-      this.saveRunConfig();
-      if (this.scheduledTimeout) {
-        clearTimeout(this.scheduledTimeout);
-        this.scheduledTimeout = null;
-      }
-      console.log('[定时问候] === 每小时调度任务触发结束 ===');
-      return;
-    }
-
-    const now = new Date();
-    const currentHour = now.getHours();
-    let shouldSend = false;
-    let probability = 0;
-
-    // 根据时间段确定概率
-    // 9-20点（早上9点到晚上8点）：每小时有 35% 的概率发送问候。
-    if (currentHour >= 9 && currentHour < 20) {
-      probability = 0.35;
-      shouldSend = Math.random() < probability;
-      console.log(`[定时问候] 当前小时 ${currentHour} 处于 9-20点时间段，概率 ${probability * 100}%。`);
-    }
-    // 6-8点或者20-24点（早上6点到早上8点或晚上8点到凌晨12点）：每小时有 85% 的概率发送问候。
-    else if ((currentHour >= 6 && currentHour < 8) || (currentHour >= 20 && currentHour < 24)) {
-      probability = 0.85;
-      shouldSend = Math.random() < probability;
-      console.log(`[定时问候] 当前小时 ${currentHour} 处于 6-8点或20-24点时间段，概率 ${probability * 100}%。`);
-    }
-    // 0-6点（凌晨12点到早上6点）：每小时有 15% 的概率发送问候。
-    else if (currentHour >= 0 && currentHour < 6) { 
-      probability = 0.15;
-      shouldSend = Math.random() < probability;
-      console.log(`[定时问候] 当前小时 ${currentHour} 处于 0-6点时间段，概率 ${probability * 100}%。`);
-    } else {
-      console.log(`[定时问候] 当前小时 ${currentHour} 不在任何预设问候时间段内，不发送问候。`);
-      shouldSend = true; // 默认不发送
-    }
-
-    // 生成随机分钟数（1-59），如果 shouldSend 为 true
-    let randomMinute = shouldSend ? Math.floor(Math.random() * 59) + 1 : 0; 
-
-    // 根据randomMinute计算实际的scheduledTime
-    const scheduledTime = new Date();
-    scheduledTime.setHours(currentHour);
-    scheduledTime.setMinutes(randomMinute);
-    scheduledTime.setSeconds(0);
-    scheduledTime.setMilliseconds(0);
-
-    // 如果计划时间已经过去，则安排到下一个小时
-    if (scheduledTime.getTime() <= now.getTime()) {
-      scheduledTime.setHours(currentHour + 1);
-      console.log(`[定时问候] 原定时间已过，调整到下一小时：${scheduledTime.toLocaleTimeString('zh-CN')}`);
-    }
-
-    // 存储调度决定到 greet_run.json (覆盖)
-    this.runConfig = {
-      timestamp: this.formatToUTCPlus8(now), // 保存为UTC+8时间
-      randomMinute: randomMinute,
-      shouldSend: shouldSend,
-      hour: currentHour, // 该配置所对应的小时
-      nextGreetingTime: shouldSend ? this.formatToUTCPlus8(scheduledTime) : null // 保存下一次问候时间为UTC+8
-    };
-
-    // 清除之前可能存在的本小时的问候调度
-    if (this.scheduledTimeout) {
-      clearTimeout(this.scheduledTimeout);
-      this.scheduledTimeout = null;
-      console.log('[定时问候] 清除了旧的问候调度。');
-    }
-
-    const delayMs = scheduledTime.getTime() - now.getTime();
-
-    // 如果计划时间已在过去（或非常接近），或者不发送问候，则本小时跳过问候
-    if (!shouldSend || delayMs <= 1000) { // 留1秒缓冲
-        console.log(`[定时问候] 本小时不发送问候，或计划问候时间 (${scheduledTime.toLocaleTimeString('zh-CN')}) 已过或太近。`);
-        this.runConfig.shouldSend = false; // 实际不发送
-        this.runConfig.nextGreetingTime = null; // 不发送则清空
-        this.addLogEntry({
-            type: 'probabilityCheck',
-            userId: 'global', 
-            hour: currentHour,
-            randomMinute: randomMinute,
-            probability: probability,
-            passed: false, // 明确记录为未通过调度
-            scheduled: false, 
-            currentTime: this.formatToUTCPlus8(now) // 保存为UTC+8时间
-        });
-        console.log('[定时问候] === 每小时调度任务触发结束 ===');
-        this.saveRunConfig(); // 保存更新后的runConfig
-        return; 
-    }
-    
-    this.addLogEntry({ // 记录概率判断结果
-        type: 'probabilityCheck',
-        userId: 'global',
-        hour: currentHour,
-        randomMinute: randomMinute,
-        probability: probability,
-        passed: shouldSend,
-        currentTime: this.formatToUTCPlus8(now) // 保存为UTC+8时间
-    });
-
-    console.log(`[定时问候] 已安排问候，预计发送时间：${scheduledTime.toLocaleTimeString('zh-CN')}。`);
-    this.scheduledTimeout = setTimeout(async () => {
-      console.log('[定时问候] 触发执行预定问候。');
-      await this.executeScheduledGreeting();
-      this.scheduledTimeout = null; // 执行后清除定时器句柄
-    }, delayMs);
-
-    this.saveRunConfig(); // 保存更新后的runConfig
-    console.log('[定时问候] === 每小时调度任务触发结束 ===');
-  }
-
-  /**
-   * 执行预定问候 (向所有已开启用户发送)
-   */
-  async executeScheduledGreeting() {
-    console.log('[定时问候] 开始执行预定问候。');
-    // 重新加载运行配置，确保使用最新状态
-    this.loadRunConfig(); 
-
-    // 额外检查 runConfig.nextGreetingTime 是否与当前时间大致匹配，防止旧的调度执行
-    const now = new Date();
-    let scheduledTimeFromConfig = null;
-    if (this.runConfig.nextGreetingTime) {
-        // 解析UTC+8时间字符串为Date对象
-        scheduledTimeFromConfig = new Date(this.runConfig.nextGreetingTime);
-    }
-
-    const timeDiff = Math.abs(now.getTime() - (scheduledTimeFromConfig ? scheduledTimeFromConfig.getTime() : 0));
-    // 允许10秒的误差，以应对setTimeout的微小延迟
-    if (!this.runConfig.shouldSend || !this.bot || !scheduledTimeFromConfig || timeDiff > 10000) {
-      console.log('[定时问候] 无问候计划、机器人实例未设置、或调度时间不匹配，跳过执行。');
-      console.log(`[定时问候] Debug Info: shouldSend=${this.runConfig.shouldSend}, bot=${!!this.bot}, scheduledTimeFromConfig=${scheduledTimeFromConfig ? scheduledTimeFromConfig.toLocaleTimeString('zh-CN') : 'N/A'}, now=${now.toLocaleTimeString('zh-CN')}, timeDiff=${timeDiff}`);
-      return;
-    }
-
-    const enabledUsers = Object.keys(this.userConfigs).filter(userId => this.userConfigs[userId] === 'on');
-    if (enabledUsers.length === 0) {
-      console.log('[定时问候] 没有用户开启，跳过执行预定问候。');
-      return;
-    }
-
-    const nowForMessage = new Date();
-    const currentTime = nowForMessage.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-    const greetingMessage = `【系统消息】现在的时间是：${currentTime}，接下来的情景是你要假扮在主动找我聊天，你可以像真人一样根据现在的时间日期（如果是特殊的日子特殊时间的话）和在做什么情况来主动给我发送消息，可以是问候之前的聊天内容，或者吐槽学习生活或工作，或者问候吃没吃饭自己吃的什么饭，或者早晚安，或者单纯的一句打招呼都可以，如果两次打招呼都没有被回复也可以问候一下对话人在做什么`;
-
-    for (const userId of enabledUsers) {
-      await this.sendActualGreeting(userId, greetingMessage);
-      console.log(`[定时问候] 已向用户 ${userId} 发送预定问候。`);
-      this.addLogEntry({ // 记录每次实际发送的问候
-        type: 'greeting',
-        action: 'scheduledGreetingSent',
-        userId: userId,
-        messageContent: greetingMessage,
-        sentAt: this.formatToUTCPlus8(new Date()) // 保存为UTC+8时间
-      });
-    }
-    console.log('[定时问候] 预定问候执行完毕。');
-  }
 }
+
+export default Greet
 

@@ -1,6 +1,6 @@
 import { segment } from "oicq";
-import cfg from '../../lib/config/config.js'
-import common from "../../lib/common/common.js"
+import cfg from '../utils/config.js'
+import common from "../utils/common.js"
 // 使用方法： 
 // 1.主人：看到任意想要撤回的消息，对其回复“撤回”二字，即可撤回该条消息（若机器人不是管理员，则只能撤回机器人两分钟内的消息）
 // 2.群员：若机器人发了不当消息，群员可以对该消息回复“撤回”，即可让机器人撤回该条消息。群员仅能撤回机器人发出的消息。
@@ -46,10 +46,10 @@ export class chehui extends plugin {
       source = (await e.friend.getChatHistory(e.source.time, 1)).pop();
     }
 
-    let botname =  cfg.getGroup(this.group_id).botAlias[0]
+    let botname = e.isGroup ? (e.group.pickMember(e.bot.uin).card || e.group.pickMember(e.bot.uin).nickname) : e.bot.nickname
     console.log(botname)
     // 判断权限
-    if ((!e.group.is_owner && !e.group.is_admin&&source.sender.user_id!=cfg.qq) || ((source.sender.role == "owner" || source.sender.role == "admin") && !e.group.is_owner)) {
+    if ((!e.group.is_owner && !e.group.is_admin&&source.sender.user_id!=e.bot.uin) || ((source.sender.role == "owner" || source.sender.role == "admin") && !e.group.is_owner)) {
       e.reply("唔，" + botname + "做不到呢")
       return true
     }
@@ -69,7 +69,7 @@ export class chehui extends plugin {
     // 下面这部分回头来看写的很烂，一堆冗余代码，但是懒得优化了，反正不影响使用~~~~~
     if (target != null) {
       // 判断权限：命令者是主人 或者 命令者不是主任 && 目标消息的qq==机器人的qq && 群友撤回权限开启
-      if (e.isMaster || (!e.isMaster && source.sender.user_id == BotConfig.account.qq && grpMbPmt)) {
+      if (e.isMaster || (!e.isMaster && source.sender.user_id == e.bot.uin && grpMbPmt)) {
         target.recallMsg(source.message_id);//撤回目标消息
         await common.sleep(300);//测试中同时撤回两条消息有概率出现第二条消息在退出该页面之前仍然存在的情况，所以这里间隔300ms
 

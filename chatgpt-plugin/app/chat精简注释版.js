@@ -1,22 +1,8 @@
-/**
- * ChatGPT 聊天插件 - 支持多种 AI 模型的聊天功能
- * 
- * 主要功能：
- * - 支持多种 AI 模型（GPT、Bing、Claude、星火、Gemini 等）
- * - 支持文本、图片、语音多种回复模式
- * - 支持消息缓冲和定时发送
- * - 支持对话管理和上下文保持
- * - 支持黑白名单过滤
- * - 支持表情包和特殊指令处理
- */
-
 // ==================== 依赖导入区域 ====================
 import plugin from '../../../lib/plugins/plugin.js' // Yunzai 插件基类
 import common from '../../../lib/common/common.js' // Yunzai 通用工具函数
 import _ from 'lodash' // lodash 工具库，提供实用函数
 import { Config } from '../utils/config.js' // 插件配置管理
-// import AzureTTS from '../utils/tts/microsoft-azure.js' // 微软 Azure 语音合成服务
-// import VoiceVoxTTS from '../utils/tts/voicevox.js' // VoiceVox 语音合成服务
 import {
   // completeJSON,        // JSON 补全工具
   // formatDate,          // 日期格式化
@@ -37,9 +23,7 @@ import {
 
 import fetch from 'node-fetch' // HTTP 请求库
 import { deleteConversation, getConversations, getLatestMessageIdByConversationId } from '../utils/conversation.js' // 对话管理相关函数
-// import { convertSpeaker, speakers } from '../utils/tts.js' // 语音角色转换工具
 import { ConversationManager, originalValues } from '../model/conversation.js' // 对话管理器类
-// import XinghuoClient from '../utils/xinghuo/xinghuo.js' // 讯飞星火认知大模型客户端
 import { getProxy } from '../utils/proxy.js' // 代理设置获取
 import { generateSuggestedResponse } from '../utils/chat.js' // 生成建议回复
 import Core from '../model/core.js' // AI 核心处理模块
@@ -154,61 +138,6 @@ export class chatgpt extends plugin {///////////////////////////////////////////
           reg: '^#当前时间$',           // 正则：查询当前时间
           fnc: 'getCurrentTime'         // 对应的处理函数
         },
-        
-        // // ==================== 各种 AI 模型的聊天规则 ====================
-        // {
-        //   reg: '^#(图片)?chat3[sS]*',   // GPT-3 聊天（支持图片模式）
-        //   fnc: 'chatgpt3'
-        // },
-        // {
-        //   reg: '^#(图片)?chat1[sS]*',   // GPT-1 聊天（支持图片模式）
-        //   fnc: 'chatgpt1'
-        // },
-        // {
-        //   reg: '^#(图片)?chatglm[sS]*', // ChatGLM 聊天（支持图片模式）
-        //   fnc: 'chatglm'
-        // },
-        // {
-        //   reg: '^#(图片)?bing[sS]*',    // Bing 聊天（支持图片模式）
-        //   fnc: 'bing'
-        // },
-        // {
-        //   reg: '^#(图片)?claude(2|3|.ai)[sS]*', // Claude 2/3 聊天（支持图片模式）
-        //   fnc: 'claude2'
-        // },
-        // {
-        //   reg: '^#(图片)?claude[sS]*',  // Claude 聊天（支持图片模式）
-        //   fnc: 'claude'
-        // },
-        // {
-        //   reg: '^#(图片)?xh[sS]*',      // 星火聊天（支持图片模式）
-        //   fnc: 'xh'
-        // },
-        
-        // // ==================== 星火助手相关规则 ====================
-        // {
-        //   reg: '^#星火助手',             // 创建星火助手对话
-        //   fnc: 'newxhBotConversation'
-        // },
-        // {
-        //   reg: '^#星火(搜索|查找)助手',   // 搜索星火助手
-        //   fnc: 'searchxhBot'
-        // },
-        
-        // // ==================== 其他 AI 模型规则 ====================
-        // {
-        //   reg: '^#(图片)?glm4[sS]*',    // GLM4 聊天（支持图片模式）
-        //   fnc: 'glm4'
-        // },
-        // {
-        //   reg: '^#(图片)?qwen[sS]*',    // 通义千问聊天（支持图片模式）
-        //   fnc: 'qwen'
-        // },
-        // {
-        //   reg: '^#(图片)?gemini[sS]*',  // Gemini 聊天（支持图片模式）
-        //   fnc: 'gemini'
-        // },
-        
         // ==================== 默认聊天规则 ====================
         {
           // 根据切换模式决定是艾特触发还是 #chat 触发
@@ -248,38 +177,9 @@ export class chatgpt extends plugin {///////////////////////////////////////////
           reg: '^#chatgpt文本模式$',      // 切换到文本回复模式
           fnc: 'switch2Text'
         },
-        // {
-        //   reg: '^#chatgpt语音模式$',      // 切换到语音回复模式
-        //   fnc: 'switch2Audio'
-        // },
-        // {
-        //   reg: '^#chatgpt语音换源',       // 切换语音合成源
-        //   fnc: 'switchTTSSource'
-        // },
-        // {
-        //   reg: '^#chatgpt设置(语音角色|角色语音|角色)', // 设置语音角色
-        //   fnc: 'setDefaultRole'
-        // },
-        
+
         // ==================== 管理功能规则 ====================
-        // {
-        //   reg: '#(OpenAI|openai)(剩余)?(余额|额度)', // 查询 OpenAI 余额
-        //   fnc: 'totalAvailable',
-        //   permission: 'master'           // 需要主人权限
-        // },
-        // {
-        //   reg: '^#chatgpt切换对话',       // 切换到指定对话
-        //   fnc: 'attachConversation'
-        // },
-        // {
-        //   reg: '^#(chatgpt)?加入对话',    // 加入他人对话
-        //   fnc: 'joinConversation'
-        // },
-        // {
-        //   reg: '^#chatgpt删除对话',       // 删除指定对话
-        //   fnc: 'deleteConversation',
-        //   permission: 'master'           // 需要主人权限
-        // },
+
         {
           reg: '^#保存语音',              // 语音合成并保存
           fnc: 'saveAudioCommand',
@@ -556,188 +456,6 @@ export class chatgpt extends plugin {///////////////////////////////////////////
     await redis.set(`CHATGPT:USER:${e.sender.user_id}`, JSON.stringify(userSetting))
     await this.reply('ChatGPT回复已转换为文字模式')
   }
-
-  // /**
-  //  * 切换到语音回复模式
-  //  * 将用户的回复模式设置为语音模式，AI回复将以语音形式播放
-  //  * 需要先检查相应的TTS服务是否已配置
-  //  * 
-  //  * @param {object} e - 事件对象
-  //  */
-  // async switch2Audio (e) {
-  //   // 根据不同的TTS模式检查配置
-  //   switch (Config.ttsMode) {
-  //     case 'vits-uma-genshin-honkai':
-  //       if (!Config.ttsSpace) {
-  //         await this.reply('您没有配置VITS API，请前往锅巴面板进行配置')
-  //         return
-  //       }
-  //       break
-  //     case 'azure':
-  //       if (!Config.azureTTSKey) {
-  //         await this.reply('您没有配置Azure Key，请前往锅巴面板进行配置')
-  //         return
-  //       }
-  //       break
-  //     case 'voicevox':
-  //       if (!Config.voicevoxSpace) {
-  //         await this.reply('您没有配置VoiceVox API，请前往锅巴面板进行配置')
-  //         return
-  //       }
-  //       break
-  //   }
-    
-  //   // 配置检查通过，设置语音模式
-  //   let userSetting = await getUserReplySetting(this.e)
-  //   userSetting.useTTS = true
-  //   userSetting.usePicture = false
-    
-  //   // 保存设置到Redis
-  //   await redis.set(`CHATGPT:USER:${e.sender.user_id}`, JSON.stringify(userSetting))
-  //   await this.reply('ChatGPT回复已转换为语音模式')
-  // }
-
-  // /**
-  //  * 切换语音合成源
-  //  * 允许用户在不同的TTS服务之间切换
-  //  * 
-  //  * @param {object} e - 事件对象
-  //  */
-  // async switchTTSSource (e) {
-  //   // 提取目标源编号
-  //   let target = e.msg.replace(/^#chatgpt语音换源/, '')
-    
-  //   switch (target.trim()) {
-  //     case '1': {
-  //       Config.ttsMode = 'vits-uma-genshin-honkai'  // VITS语音合成
-  //       break
-  //     }
-  //     case '2': {
-  //       Config.ttsMode = 'azure'  // 微软Azure语音合成
-  //       break
-  //     }
-  //     case '3': {
-  //       Config.ttsMode = 'voicevox'  // VoiceVox语音合成
-  //       break
-  //     }
-  //     default: {
-  //       await this.reply('请使用#chatgpt语音换源+数字进行换源。1为vits-uma-genshin-honkai，2为微软Azure，3为voicevox')
-  //       return
-  //     }
-  //   }
-  //   await this.reply('语音转换源已切换为' + Config.ttsMode)
-  // }
-
-  // /**
-  //  * 设置默认语音角色
-  //  * 允许用户为不同的TTS服务设置语音角色
-  //  * 支持角色名称设置和情绪配置
-  //  * 
-  //  * @param {object} e - 事件对象
-  //  */
-  // async setDefaultRole (e) {
-  //   // 检查不同TTS模式的配置
-  //   if (Config.ttsMode === 'vits-uma-genshin-honkai' && !Config.ttsSpace) {
-  //     await this.reply('您没有配置vits-uma-genshin-honkai API，请前往后台管理或锅巴面板进行配置')
-  //     return
-  //   }
-  //   if (Config.ttsMode === 'azure' && !Config.azureTTSKey) {
-  //     await this.reply('您没有配置azure 密钥，请前往后台管理或锅巴面板进行配置')
-  //     return
-  //   }
-  //   if (Config.ttsMode === 'voicevox' && !Config.voicevoxSpace) {
-  //     await this.reply('您没有配置voicevox API，请前往后台管理或锅巴面板进行配置')
-  //     return
-  //   }
-    
-  //   // 提取角色名称
-  //   const regex = /^#chatgpt设置(语音角色|角色语音|角色)/
-  //   let speaker = e.msg.replace(regex, '').trim() || '随机'
-    
-  //   // 根据不同的TTS模式处理角色设置
-  //   switch (Config.ttsMode) {
-  //     case 'vits-uma-genshin-honkai': {
-  //       let userSetting = await getUserReplySetting(this.e)
-  //       userSetting.ttsRole = convertSpeaker(speaker)  // 转换角色名称
-        
-  //       // 检查角色是否支持
-  //       if (speakers.indexOf(userSetting.ttsRole) >= 0) {
-  //         await redis.set(`CHATGPT:USER:${e.sender.user_id}`, JSON.stringify(userSetting))
-  //         await this.reply(`当前语音模式为${Config.ttsMode},您的默认语音角色已被设置为 "${userSetting.ttsRole}" `)
-  //       } else if (speaker === '随机') {
-  //         userSetting.ttsRole = '随机'
-  //         await redis.set(`CHATGPT:USER:${e.sender.user_id}`, JSON.stringify(userSetting))
-  //         await this.reply(`当前语音模式为${Config.ttsMode},您的默认语音角色已被设置为 "随机" `)
-  //       } else {
-  //         await this.reply(`抱歉，"${userSetting.ttsRole}"我还不认识呢`)
-  //       }
-  //       break
-  //     }
-      
-  //     case 'azure': {
-  //       let userSetting = await getUserReplySetting(this.e)
-  //       // 在Azure支持的配置中查找匹配的角色
-  //       let chosen = AzureTTS.supportConfigurations.filter(s => s.name === speaker)
-        
-  //       if (speaker === '随机') {
-  //         userSetting.ttsRoleAzure = '随机'
-  //         await redis.set(`CHATGPT:USER:${e.sender.user_id}`, JSON.stringify(userSetting))
-  //         await this.reply(`当前语音模式为${Config.ttsMode},您的默认语音角色已被设置为 "随机" `)
-  //       } else if (chosen.length === 0) {
-  //         // 角色不存在，显示支持的角色列表
-  //         await this.reply(`抱歉，没有"${speaker}"这个角色，目前azure模式下支持的角色有${AzureTTS.supportConfigurations.map(item => item.name).join('、')}`)
-  //       } else {
-  //         // 设置选中的角色
-  //         userSetting.ttsRoleAzure = chosen[0].code
-  //         await redis.set(`CHATGPT:USER:${e.sender.user_id}`, JSON.stringify(userSetting))
-          
-  //         // 检查是否支持情绪配置
-  //         const supportEmotion = AzureTTS.supportConfigurations.find(config => config.name === speaker)?.emotion
-  //         await this.reply(`当前语音模式为${Config.ttsMode},您的默认语音角色已被设置为 ${speaker}-${chosen[0].gender}-${chosen[0].languageDetail} ${supportEmotion && Config.azureTTSEmotion ? '，此角色支持多情绪配置，建议重新使用设定并结束对话以获得最佳体验！' : ''}`)
-  //       }
-  //       break
-  //     }
-      
-  //     case 'voicevox': {
-  //       // 解析角色和风格（格式：角色名-风格名）
-  //       let regex = /^(.*?)-(.*)$/
-  //       let match = regex.exec(speaker)
-  //       let style = null
-  //       if (match) {
-  //         speaker = match[1]  // 角色名
-  //         style = match[2]    // 风格名
-  //       }
-        
-  //       let userSetting = await getUserReplySetting(e)
-        
-  //       if (speaker === '随机') {
-  //         userSetting.ttsRoleVoiceVox = '随机'
-  //         await redis.set(`CHATGPT:USER:${e.sender.user_id}`, JSON.stringify(userSetting))
-  //         await this.reply(`当前语音模式为${Config.ttsMode},您的默认语音角色已被设置为 "随机" `)
-  //         break
-  //       }
-        
-  //       // 查找匹配的角色
-  //       let chosen = VoiceVoxTTS.supportConfigurations.filter(s => s.name === speaker)
-  //       if (chosen.length === 0) {
-  //         await this.reply(`抱歉，没有"${speaker}"这个角色，目前voicevox模式下支持的角色有${VoiceVoxTTS.supportConfigurations.map(item => item.name).join('、')}`)
-  //         break
-  //       }
-        
-  //       // 检查风格是否支持
-  //       if (style && !chosen[0].styles.find(item => item.name === style)) {
-  //         await this.reply(`抱歉，"${speaker}"这个角色没有"${style}"这个风格，目前支持的风格有${chosen[0].styles.map(item => item.name).join('、')}`)
-  //         break
-  //       }
-        
-  //       // 设置角色和风格
-  //       userSetting.ttsRoleVoiceVox = chosen[0].name + (style ? `-${style}` : '')
-  //       await redis.set(`CHATGPT:USER:${e.sender.user_id}`, JSON.stringify(userSetting))
-  //       await this.reply(`当前语音模式为${Config.ttsMode},您的默认语音角色已被设置为 "${userSetting.ttsRoleVoiceVox}" `)
-  //       break
-  //     }
-  //   }
-  // }
 
   /**
    * 主要的聊天处理函数
@@ -1078,7 +796,7 @@ export class chatgpt extends plugin {///////////////////////////////////////////
     
     // 将新消息添加到缓冲区
     buffer.messages.push(prompt);
-    logger.info(`[ChatGPT Debug] 消息已缓冲，对话键: ${conversationKey}, 当前缓冲消息数: ${buffer.messages.length}, 消息内容: '${prompt}'`);
+    logger.info(`[ChatGPT Debug] 消息已缓冲， 当前缓冲消息数: ${buffer.messages.length}, 消息内容: '${prompt}'`);
 
     // 清除任何现有的定时器
     if (buffer.timer) {
@@ -1105,7 +823,7 @@ export class chatgpt extends plugin {///////////////////////////////////////////
     buffer.timer = setTimeout(async () => {
       const currentBuffer = chatMessageBuffers.get(conversationKey);
       if (!currentBuffer || currentBuffer.messages.length === 0) {
-          logger.warn(`[ChatGPT Debug] 定时器触发但缓冲为空，对话键: ${conversationKey}`);
+          logger.warn(`[ChatGPT Debug] 定时器触发但缓冲为空`);
           return;
       }
 
@@ -1132,7 +850,7 @@ export class chatgpt extends plugin {///////////////////////////////////////////
           combinedPrompt = currentBuffer.messages.join(' ');
         }
       }
-      logger.info(`[ChatGPT Debug] 定时器触发，开始调用AI，对话键: ${conversationKey}, 合并后消息: '${combinedPrompt}'`);
+      logger.info(`[ChatGPT Debug] 定时器触发，开始调用API, 合并后消息: '${combinedPrompt}'`);
 
       // 为这个请求生成一个唯一的ID，用于防止重复处理
       const requestId = Date.now().toString();
@@ -1257,26 +975,7 @@ export class chatgpt extends plugin {///////////////////////////////////////////
       // 这给用户一个反馈，表明机器人已经收到消息并正在处理
       await this.reply('我正在思考如何回复你，请稍等', true, { recallMsg: 2 })
     }
-    
-    // // ==================== Azure TTS情绪处理增强 ====================
-    // // 检查是否有之前的情绪错误记录，用于指导AI正确使用情绪标记
-    // const emotionFlag = await redis.get(`CHATGPT:WRONG_EMOTION:${e.sender.user_id}`)
-    // if (Config.ttsMode === 'azure' && Config.enhanceAzureTTSEmotion && userSetting.useTTS === true && await AzureTTS.getEmotionPrompt(e)) {
-    //   switch (emotionFlag) {
-    //     case '1':
-    //       // 上次回复没有添加情绪标记
-    //       prompt += '(上一次回复没有添加情绪，请确保接下来的对话正确使用情绪和情绪格式，回复时忽略此内容。)'
-    //       break
-    //     case '2':
-    //       // 使用了错误的情绪格式或不支持的情绪
-    //       prompt += '(不要使用给出情绪范围的词和错误的情绪格式，请确保接下来的对话正确选择情绪，回复时忽略此内容。)'
-    //       break
-    //     case '3':
-    //       // 提供了多个情绪标记
-    //       prompt += '(不要给出多个情绪[]项，请确保接下来的对话给且只给出一个正确情绪项，回复时忽略此内容。)'
-    //       break
-    //   }
-    // }
+
     
     logger.info(`Chatgpt Prompt: ${prompt}`)
     
@@ -1295,98 +994,14 @@ export class chatgpt extends plugin {///////////////////////////////////////////
       logger.info(`[时间代理] 已将实时时间添加到 prompt: ${prompt}`);
     }
 
-    // ==================== 不同AI模型的对话管理策略 ====================
-    // if (use === 'api3') {
-    //   // API3模式：支持对话穿插，多用户可以共享同一个对话
-    //   // 这种模式下不按照QQ号来进行判断，而是按照对话ID
-    //   let conversationId = await redis.get(`CHATGPT:QQ_CONVERSATION:${(e.isGroup && Config.groupMerge) ? e.group_id.toString() : e.sender.user_id}`)
-      
-    //   if (conversationId) {
-    //     // 已存在对话，获取最后一条消息的ID作为父消息ID
-    //     let lastMessageId = await redis.get(`CHATGPT:CONVERSATION_LAST_MESSAGE_ID:${conversationId}`)
-    //     if (!lastMessageId) {
-    //       // 如果本地没有缓存，则从远程API获取
-    //       lastMessageId = await getLatestMessageIdByConversationId(conversationId, newFetch)
-    //     }
-        
-    //     // 构造对话上下文对象
-    //     conversation = {
-    //       conversationId,           // 对话ID
-    //       parentMessageId: lastMessageId  // 父消息ID，用于维持对话连续性
-    //     }
-        
-    //     if (Config.debug) {
-    //       logger.mark({ previousConversation })
-    //     }
-    //   } else {
-    //     // 新对话，初始化对话记录
-    //     let ctime = new Date()
-    //     previousConversation = {
-    //       sender: e.sender,         // 发送者信息
-    //       ctime,                    // 创建时间
-    //       utime: ctime,            // 更新时间
-    //       num: 0                   // 对话轮数
-    //     }
-    //   }
-    // } else {
       // ==================== 其他AI模型的对话管理 ====================
       // 非API3模式：每种AI模型使用独立的Redis键名存储对话
       switch (use) {
-        // case 'api': {
-        //   // 标准API模式的对话键名
-        //   key = `CHATGPT:CONVERSATIONS:${(e.isGroup && Config.groupMerge) ? e.group_id.toString() : e.sender.user_id}`
-        //   break
-        // }
-        // case 'bing': {
-        //   // Bing聊天模式的对话键名
-        //   key = `CHATGPT:CONVERSATIONS_BING:${(e.isGroup && Config.groupMerge) ? e.group_id.toString() : e.sender.user_id}`
-        //   break
-        // }
-        // case 'chatglm': {
-        //   // ChatGLM模式的对话键名
-        //   key = `CHATGPT:CONVERSATIONS_CHATGLM:${(e.isGroup && Config.groupMerge) ? e.group_id.toString() : e.sender.user_id}`
-        //   break
-        // }
-        // case 'claude2': {
-        //   // Claude2模式的对话键名（注意：只使用用户ID，不支持群组合并）
-        //   key = `CHATGPT:CLAUDE2_CONVERSATION:${e.sender.user_id}`
-        //   break
-        // }
-        // case 'claude2': {
-        //   // Claude2模式的对话键名（注意：只使用用户ID，不支持群组合并）
-        //   key = `CHATGPT:CLAUDE2_CONVERSATION:${e.sender.user_id}`
-        //   break
-        // }
-        // case 'xh': {
-        //   // 星火认知大模型的对话键名
-        //   key = `CHATGPT:CONVERSATIONS_XH:${(e.isGroup && Config.groupMerge) ? e.group_id.toString() : e.sender.user_id}`
-        //   break
-        // }
-        // case 'azure': {
-        //   // Azure OpenAI服务的对话键名
-        //   key = `CHATGPT:CONVERSATIONS_AZURE:${e.sender.user_id}`
-        //   break
-        // }
-        // case 'qwen': {
-        //   // 通义千问模型的对话键名
-        //   key = `CHATGPT:CONVERSATIONS_QWEN:${(e.isGroup && Config.groupMerge) ? e.group_id.toString() : e.sender.user_id}`
-        //   break
-        // }
         case 'gemini': {
           // Google Gemini模型的对话键名
           key = `CHATGPT:CONVERSATIONS_GEMINI:${(e.isGroup && Config.groupMerge) ? e.group_id.toString() : e.sender.user_id}`
           break
         }
-        // case 'claude': {
-        //   // Claude模型的对话键名
-        //   key = `CHATGPT:CONVERSATIONS_CLAUDE:${(e.isGroup && Config.groupMerge) ? e.group_id.toString() : e.sender.user_id}`
-        //   break
-        // }
-        // case 'chatglm4': {
-        //   // ChatGLM4模型的对话键名
-        //   key = `CHATGPT:CONVERSATIONS_CHATGLM4:${(e.isGroup && Config.groupMerge) ? e.group_id.toString() : e.sender.user_id}`
-        //   break
-        // }
       }
       
       // ==================== 对话记录的初始化和恢复 ====================
@@ -1445,29 +1060,7 @@ export class chatgpt extends plugin {///////////////////////////////////////////
       if (chatMessage?.noMsg) {
         return false  // AI明确表示不需要回复
       }
-      
-      // // ==================== 处理星火模型的图片回复 ====================
-      // // 星火模型可能会返回图片内容，需要特殊处理
-      // if (use === 'xh' && chatMessage?.images) {
-      //   chatMessage.images.forEach(element => {
-      //     // 发送图片标签和图片内容
-      //     this.reply([element.tag, segment.image(element.url)])
-      //   })
-      // }
-      
-      // // ==================== 处理ChatGLM4的图片回复 ====================
-      // // ChatGLM4的图片处理已调整至sendMessage中处理，此处不再需要额外处理
-      
-      // // ==================== 处理API模式的特殊情况 ====================
-      // if (use === 'api' && !chatMessage) {
-      //   // API模式下，如果没有返回消息，通常表示字数超限或其他限制
-      //   return false  // 直接返回，不进行后续处理
-      // }
-      
-      // ==================== 更新对话状态和上下文 ====================
-      // if (use !== 'api3') {
-        // 非API3模式需要手动管理对话状态
-        
+
         // 保存对话ID到对话记录中
         previousConversation.conversation = {
           conversationId: chatMessage.conversationId
@@ -1624,93 +1217,6 @@ export class chatgpt extends plugin {///////////////////////////////////////////
         await this.reply('没有任何回复', true)
         return
       }
-      
-      // // ==================== Azure TTS情绪解析准备 ====================
-      // let emotion, emotionDegree  // 情绪类型和强度变量
-      
-      // // 检查是否需要进行Azure TTS情绪解析（仅限Claude和Bing模式）
-      // if (Config.ttsMode === 'azure' && (use === 'claude' || use === 'bing') && await AzureTTS.getEmotionPrompt(e)) {
-      //   // ==================== Azure TTS情绪解析处理 ====================
-      //   let ttsRoleAzure = userSetting.ttsRoleAzure  // 获取用户设置的Azure TTS角色
-        
-      //   // 定义情绪标记的正则表达式：匹配 [情绪名, 强度] 格式
-      //   const emotionReg = /\[\s*['`'']?(\w+)[`'']?\s*[,，、]\s*([\d.]+)\s*\]/
-      //   const emotionTimes = response.match(/\[\s*['`'']?(\w+)[`'']?\s*[,，、]\s*([\d.]+)\s*\]/g)  // 查找所有情绪标记
-      //   const emotionMatch = response.match(emotionReg)  // 匹配第一个情绪标记
-        
-      //   if (emotionMatch) {
-      //     // ==================== 情绪标记位置分析 ====================
-      //     // 计算情绪标记在文本中的位置
-      //     const [startIndex, endIndex] = [
-      //       emotionMatch.index,  // 情绪标记开始位置
-      //       emotionMatch.index + emotionMatch[0].length - 1  // 情绪标记结束位置
-      //     ]
-          
-      //     // ==================== 文本分割策略 ====================
-      //     // 根据情绪标记位置决定如何分割文本和情绪信息
-      //     const ttsArr =
-      //       response.length / 2 < endIndex  // 如果情绪标记在文本后半部分
-      //         ? [response.substring(startIndex), response.substring(0, startIndex)]  // 先情绪后文本
-      //         : [  // 如果情绪标记在文本前半部分
-      //             response.substring(0, endIndex + 1),    // 包含情绪标记的前部分
-      //             response.substring(endIndex + 1)        // 纯文本的后部分
-      //           ]
-                
-      //     // ==================== 情绪信息提取 ====================
-      //     const match = ttsArr[0].match(emotionReg)  // 从包含情绪的部分提取情绪信息
-      //     response = ttsArr[1].replace(/\n/, '').trim()  // 清理并获取纯文本内容
-          
-      //     if (match) {
-      //       [emotion, emotionDegree] = [match[1], match[2]]  // 提取情绪名称和强度
-            
-      //       // ==================== 情绪支持性验证 ====================
-      //       // 检查当前Azure TTS角色是否支持提取到的情绪
-      //       const configuration = AzureTTS.supportConfigurations.find(
-      //         (config) => config.code === ttsRoleAzure
-      //       )
-      //       const supportedEmotions =
-      //         configuration.emotion && Object.keys(configuration.emotion)
-              
-      //       if (supportedEmotions && supportedEmotions.includes(emotion)) {
-      //         logger.warn(`角色 ${ttsRoleAzure} 支持 ${emotion} 情绪.`)
-      //         await redis.set(`CHATGPT:WRONG_EMOTION:${e.sender.user_id}`, '0')  // 标记情绪有效
-      //       } else {
-      //         logger.warn(`角色 ${ttsRoleAzure} 不支持 ${emotion} 情绪.`)
-      //         await redis.set(`CHATGPT:WRONG_EMOTION:${e.sender.user_id}`, '2')  // 标记情绪不支持
-      //       }
-            
-      //       logger.info(`情绪: ${emotion}, 程度: ${emotionDegree}`)
-            
-      //       // ==================== 多情绪处理 ====================
-      //       if (emotionTimes.length > 1) {
-      //         logger.warn('回复包含多个情绪项')
-      //         // 处理包含多个情绪项的情况，移除所有情绪标记保留纯文本
-      //         // 后续可以考虑实现单次回复多情绪的配置
-      //         response = response.replace(/\[\s*['`'']?(\w+)[`'']?\s*[,，、]\s*([\d.]+)\s*\]/g, '').trim()
-      //         await redis.set(`CHATGPT:WRONG_EMOTION:${e.sender.user_id}`, '3')  // 标记多情绪状态
-      //       }
-      //     } else {
-      //       // ==================== 情绪格式错误处理 ====================
-      //       // AI使用了不符合预期格式的情绪标记符号
-      //       logger.warn('情绪格式错误')
-      //       await redis.set(`CHATGPT:WRONG_EMOTION:${e.sender.user_id}`, '2')  // 标记格式错误
-      //     }
-      //   } else {
-      //     // ==================== 无情绪信息处理 ====================
-      //     // AI回复中没有包含任何情绪标记
-      //     logger.warn('回复不包含情绪')
-      //     await redis.set(`CHATGPT:WRONG_EMOTION:${e.sender.user_id}`, '1')  // 标记无情绪信息
-      //   }
-      // }
-      // // ==================== Sydney情绪模式处理 ====================
-      // if (Config.sydneyMood) {
-      //   // Sydney模式：处理包含情绪信息的JSON格式回复
-      //   let tempResponse = completeJSON(response)  // 尝试补全和解析JSON
-      //   if (tempResponse.text) response = tempResponse.text  // 提取文本内容
-      //   if (tempResponse.mood) mood = tempResponse.mood      // 提取情绪信息
-      // } else {
-      //   mood = ''  // 非Sydney模式不使用情绪
-      // }
       
       // ==================== 回复内容屏蔽词检查 ====================
       // 检查AI回复是否包含配置的屏蔽词
@@ -1892,144 +1398,6 @@ export class chatgpt extends plugin {///////////////////////////////////////////
         return // 不执行后续的文本或图片发送逻辑
       }
 
-      // // ==================== TTS语音合成模式处理 ====================
-      // if (useTTS) {
-      //   // 缓存对话数据用于后续检索和分析
-      //   this.cacheContent(e, use, response, prompt, quotemessage, mood, chatMessage.suggestedResponses, imgUrls)
-        
-      //   // ==================== Bing特定错误消息处理 ====================
-      //   if (response === 'Sorry, I think we need to move on! Click "New topic" to chat about something else.') {
-      //     this.reply('当前对话超过上限，已重置对话', false, { at: true })
-      //     await redis.del(`CHATGPT:CONVERSATIONS_BING:${e.sender.user_id}`)
-      //     return false
-      //   } else if (response === 'Unexpected message author.') {
-      //     this.reply('无法回答当前话题，已重置对话', false, { at: true })
-      //     await redis.del(`CHATGPT:CONVERSATIONS_BING:${e.sender.user_id}`)
-      //     return false
-      //   } else if (response === 'Throttled: Request is throttled.') {
-      //     this.reply('今日对话已达上限')
-      //     return false
-      //   }
-        
-      //   // ==================== TTS文本预处理 ====================
-      //   let ttsResponse, ttsRegex
-        
-      //   // 解析TTS正则表达式配置（用于过滤不需要朗读的内容）
-      //   const regex = /^\/(.*)\/([gimuy]*)$/
-      //   const match = Config.ttsRegex.match(regex)
-      //   if (match) {
-      //     const pattern = match[1]    // 正则模式
-      //     const flags = match[2]      // 正则标志
-      //     ttsRegex = new RegExp(pattern, flags) // 构建正则表达式对象
-      //   } else {
-      //     ttsRegex = ''
-      //   }
-      //   ttsResponse = response.replace(ttsRegex, '')  // 移除不需要朗读的内容
-        
-      //   // ==================== Emoji表情符号处理 ====================
-      //   // 处理Azure语音会朗读emoji表情的问题
-      //   try {
-      //     let emojiStrip
-      //     emojiStrip = (await import('emoji-strip')).default
-      //     ttsResponse = emojiStrip(ttsResponse)  // 去除emoji表情
-      //   } catch (error) {
-      //     await this.reply('依赖emoji-strip未安装，请执行pnpm install emoji-strip安装依赖', true)
-      //   }
-        
-      //   // ==================== TTS标点符号优化 ====================
-      //   // 处理多行回复和标点符号朗读问题
-      //   ttsResponse = ttsResponse.replace(/[-:_；*;\n]/g, '，')  // 替换特殊符号为逗号
-        
-      //   // ==================== 文本消息分段发送 ====================
-      //   // 先发送文字回复，避免等待语音合成时间过长
-      //   if (Config.alsoSendText || ttsResponse.length > parseInt(Config.ttsAutoFallbackThreshold)) {
-      //     if (Config.ttsMode === 'vits-uma-genshin-honkai' && ttsResponse.length > parseInt(Config.ttsAutoFallbackThreshold)) {
-      //       await this.reply('回复的内容过长，已转为文本模式')
-      //     }
-          
-      //     // ==================== 智能文本分段发送 ====================
-      //     // 将长文本按照合适的分割点进行分段，避免单条消息过长
-      //     let texts = customSplitRegex(
-      //       response, 
-      //       e.isPrivate ? /\n\n/g : /(?<!\?)[。？\n](?!\?)/, // 私聊按双换行分割，群聊按句号/问号/单换行分割
-      //       e.isPrivate ? Infinity : 3  // 私聊不限分段数，群聊最多3段
-      //     )
-          
-      //     // 逐段发送文本消息
-      //     for (let originalSegmentT of texts) {
-      //       // 检查是否有中断标志（用户可能要求停止输出）
-      //       if (interruptionFlags.get(conversationKey)) {
-      //         logger.info(`[ChatGPT] 对话键 ${conversationKey} 的消息输出被中断。`);
-      //         break; // 停止发送更多分段
-      //       }
-            
-      //       // 跳过空内容段落
-      //       if (!originalSegmentT) {
-      //         continue
-      //       }
-            
-      //       originalSegmentT = originalSegmentT.trim()  // 清理首尾空白字符
-            
-      //       // ==================== 表情和@符号处理 ====================
-      //       // 转换人脸表情符号并处理@机器人的逻辑
-      //       let textMsgArray = await convertFaces(originalSegmentT, Config.enableRobotAt, e);
-      //       textMsgArray = textMsgArray.map(filterResponseChunk).filter(i => !!i);  // 过滤无效内容块
-            
-      //       // 发送处理后的消息数组
-      //       if (textMsgArray.length > 0) {
-      //         await this.reply(textMsgArray, e.isGroup);
-              
-      //         // ==================== 消息发送间隔控制 ====================
-      //         // 根据文本长度动态调整发送间隔，避免刷屏
-      //         await new Promise((resolve) => {
-      //           setTimeout(() => {
-      //             resolve();
-      //           }, Math.min(originalSegmentT.length * 200, 3000)); // 最短200ms/字符，最长3秒
-      //         });
-      //       }
-      //     }
-          
-      //     // ==================== 引用消息转发 ====================
-      //     // 如果有引用消息且未被中断，发送转发消息卡片
-      //     if (quotemessage.length > 0 && !interruptionFlags.get(conversationKey)) {
-      //       this.reply(await makeForwardMsg(this.e, quotemessage.map(msg => `${msg.text} - ${msg.url}`)))
-      //     }
-          
-      //     // ==================== 建议回复显示 ====================
-      //     // 显示AI建议的后续回复选项
-      //     if (Config.enableSuggestedResponses && chatMessage.suggestedResponses && !interruptionFlags.get(conversationKey)) {
-      //       this.reply(`建议的回复：\n${chatMessage.suggestedResponses}`)
-      //     }
-      //   }
-        
-      //   // ==================== 语音合成与发送 ====================
-      //   // 生成TTS语音文件并发送
-      //   const sendable = await generateAudio(this.e, ttsResponse, emotion, emotionDegree)
-      //   if (sendable) {
-      //     await this.reply(sendable)  // 发送语音消息
-      //   } else {
-      //     await this.reply('合成语音发生错误~')  // 语音合成失败提示
-      //   }
-      // // ==================== 图片模式回复处理 ====================
-      // } else if (forcePictureMode || userSetting.usePicture || (Config.autoUsePicture && response.length > Config.autoUsePictureThreshold)) {
-      //   // 条件判断：强制图片模式 || 用户设置使用图片 || (自动图片模式且文本长度超过阈值)
-      //   try {
-      //     // 渲染回复内容为图片并发送
-      //     await this.renderImage(e, use, response, prompt, quotemessage, mood, chatMessage.suggestedResponses, imgUrls)
-      //   } catch (err) {
-      //     // 图片渲染失败的容错处理
-      //     logger.warn('error happened while uploading content to the cache server. QR Code will not be showed in this picture.')
-      //     logger.error(err)
-      //     // 降级为基础图片模式（不包含二维码等额外内容）
-      //     await this.renderImage(e, use, response, prompt)
-      //   }
-        
-      //   // ==================== 图片模式下的建议回复 ====================
-      //   // 图片模式下单独发送建议回复（因为图片中可能显示不全）
-      //   if (Config.enableSuggestedResponses && chatMessage.suggestedResponses) {
-      //     this.reply(`建议的回复：\n${chatMessage.suggestedResponses}`)
-      //   }
-        
       // // ==================== 普通文本模式回复处理 ====================
       // } else {
         // 缓存对话数据用于后续检索和历史记录
@@ -2157,114 +1525,6 @@ export class chatgpt extends plugin {///////////////////////////////////////////
       }
     }
   }
-
-  // // ================================================
-  // // AI模型快捷调用函数区域
-  // // ================================================
-  
-  // /**
-  //  * ==================== ChatGPT模型快捷入口函数 ====================
-  //  * 这些函数为不同的AI模型提供快速调用入口，简化用户操作
-  //  * 每个函数都会调用通用的otherMode方法来处理请求
-  //  */
-
-  // /**
-  //  * ChatGPT-1 模式快捷入口
-  //  * @param {object} e - 事件对象，包含用户消息和上下文信息
-  //  * @returns {Promise} 返回otherMode处理结果
-  //  */
-  // async chatgpt1 (e) {
-  //   return await this.otherMode(e, 'api', /#(图片)?chat1/)  // 使用api模式，匹配#chat1或#图片chat1
-  // }
-
-  // /**
-  //  * ChatGPT-3 模式快捷入口  
-  //  * @param {object} e - 事件对象，包含用户消息和上下文信息
-  //  * @returns {Promise} 返回otherMode处理结果
-  //  */
-  // async chatgpt3 (e) {
-  //   return await this.otherMode(e, 'api3', /#(图片)?chat3/)  // 使用api3模式，匹配#chat3或#图片chat3
-  // }
-
-  // /**
-  //  * ChatGLM 智谱AI模式快捷入口
-  //  * 调用智谱AI的ChatGLM模型进行对话
-  //  * @param {object} e - 事件对象，包含用户消息和上下文信息
-  //  * @returns {Promise} 返回otherMode处理结果
-  //  */
-  // async chatglm (e) {
-  //   return await this.otherMode(e, 'chatglm')  // 使用ChatGLM模式处理请求
-  // }
-
-  // /**
-  //  * Bing Chat模式快捷入口
-  //  * 调用微软Bing搜索引擎的AI聊天功能，支持联网搜索
-  //  * @param {object} e - 事件对象，包含用户消息和上下文信息
-  //  * @returns {Promise} 返回otherMode处理结果
-  //  */
-  // async bing (e) {
-  //   return await this.otherMode(e, 'bing', /#(图片)?bing/)  // 使用Bing模式，匹配#bing或#图片bing
-  // }
-
-  // /**
-  //  * Claude 2/3模式快捷入口
-  //  * 调用Anthropic的Claude 2或Claude 3模型进行对话
-  //  * @param {object} e - 事件对象，包含用户消息和上下文信息
-  //  * @returns {Promise} 返回otherMode处理结果
-  //  */
-  // async claude2 (e) {
-  //   return await this.otherMode(e, 'claude2', /^#(图片)?claude(2|3|.ai)/)  // 匹配#claude2、#claude3、#claude.ai等
-  // }
-
-  // /**
-  //  * Claude模式快捷入口
-  //  * 调用Anthropic的Claude模型进行对话
-  //  * @param {object} e - 事件对象，包含用户消息和上下文信息
-  //  * @returns {Promise} 返回otherMode处理结果
-  //  */
-  // async claude (e) {
-  //   return await this.otherMode(e, 'claude', /#(图片)?claude/)  // 使用Claude模式，匹配#claude或#图片claude
-  // }
-
-  // /**
-  //  * 通义千问模式快捷入口
-  //  * 调用阿里巴巴的通义千问大语言模型进行对话
-  //  * @param {object} e - 事件对象，包含用户消息和上下文信息
-  //  * @returns {Promise} 返回otherMode处理结果
-  //  */
-  // async qwen (e) {
-  //   return await this.otherMode(e, 'qwen', /#(图片)?qwen/)  // 使用通义千问模式，匹配#qwen或#图片qwen
-  // }
-
-  // /**
-  //  * GLM4模式快捷入口
-  //  * 调用智谱AI的GLM4模型进行对话，GLM4是ChatGLM的升级版本
-  //  * @param {object} e - 事件对象，包含用户消息和上下文信息
-  //  * @returns {Promise} 返回otherMode处理结果
-  //  */
-  // async glm4 (e) {
-  //   return await this.otherMode(e, 'chatglm4', /#(图片)?glm4/)  // 使用GLM4模式，匹配#glm4或#图片glm4
-  // }
-
-  // /**
-  //  * Gemini模式快捷入口
-  //  * 调用Google的Gemini大语言模型进行对话
-  //  * @param {object} e - 事件对象，包含用户消息和上下文信息
-  //  * @returns {Promise} 返回otherMode处理结果
-  //  */
-  // async gemini (e) {
-  //   return await this.otherMode(e, 'gemini', /#(图片)?gemini/)  // 使用Gemini模式，匹配#gemini或#图片gemini
-  // }
-
-  // /**
-  //  * 星火大模型模式快捷入口
-  //  * 调用科大讯飞的星火大语言模型进行对话
-  //  * @param {object} e - 事件对象，包含用户消息和上下文信息
-  //  * @returns {Promise} 返回otherMode处理结果
-  //  */
-  // async xh (e) {
-  //   return await this.otherMode(e, 'xh', /#(图片)?xh/)  // 使用星火模式，匹配#xh或#图片xh
-  // }
 
   // ================================================
   // 内容处理与渲染功能区域
@@ -2395,169 +1655,6 @@ export class chatgpt extends plugin {///////////////////////////////////////////
     }
   }
 
-  // /**
-  //  * ==================== 星火助手对话创建功能 ====================
-  //  * 创建新的星火大模型助手对话会话
-  //  * 支持指定特定的助手Bot ID来获得不同的对话体验
-  //  * 
-  //  * @param {object} e - 事件对象，包含用户消息和上下文信息
-  //  * @returns {Promise<boolean>} 返回操作结果
-  //  */
-  // async newxhBotConversation (e) {
-  //   // ==================== 提取助手ID ====================
-  //   // 从用户消息中提取星火助手的Bot ID
-  //   let botId = e.msg.replace(/^#星火助手/, '').trim()
-    
-  //   // ==================== 模式验证 ====================
-  //   // 检查星火模式配置，星火助手仅支持web体验版
-  //   if (Config.xhmode != 'web') {
-  //     await this.reply('星火助手仅支持体验版使用', true)
-  //     return true
-  //   }
-    
-  //   // ==================== 参数验证 ====================
-  //   if (!botId) {
-  //     // 未提供有效的助手ID
-  //     await this.reply('无效助手id', true)
-  //   } else {
-  //     // ==================== 身份验证 ====================
-  //     const ssoSessionId = Config.xinghuoToken  // 获取星火登录token
-  //     if (!ssoSessionId) {
-  //       await this.reply('未绑定星火token，请使用#chatgpt设置星火token命令绑定token', true)
-  //       return true
-  //     }
-      
-  //     // ==================== 创建星火客户端 ====================
-  //     let client = new XinghuoClient({
-  //       ssoSessionId,  // 使用配置的登录session
-  //       cache: null    // 不使用缓存，每次都是新的对话
-  //     })
-      
-  //     try {
-  //       // ==================== 创建助手对话 ====================
-  //       let chatId = await client.createChatList(botId)  // 使用指定的Bot ID创建对话
-        
-  //       // ==================== 获取助手信息 ====================
-  //       // 向星火服务器请求助手的详细信息
-  //       let botInfoRes = await fetch(`https://xinghuo.xfyun.cn/iflygpt/bot/getBotInfo?chatId=${chatId.chatListId}`, {
-  //         method: 'GET',
-  //         headers: {
-  //           'Content-Type': 'application/json',
-  //           Cookie: 'ssoSessionId=' + ssoSessionId + ';',  // 携带登录凭证
-  //           // 使用移动端User-Agent避免某些限制
-  //           'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/113.0.5672.69 Mobile/15E148 Safari/604.1'
-  //         }
-  //       })
-        
-  //       // ==================== 处理助手信息响应 ====================
-  //       if (botInfoRes.ok) {
-  //         let botInfo = await botInfoRes.json()
-  //         if (botInfo.flag) {
-  //           // ==================== 保存对话会话信息 ====================
-  //           let ctime = new Date()  // 创建时间
-            
-  //           // 构建对话键名：群聊合并模式下使用群ID，否则使用用户ID
-  //           const conversationKey = `CHATGPT:CONVERSATIONS_XH:${(e.isGroup && Config.groupMerge) ? e.group_id.toString() : e.sender.user_id}`
-            
-  //           // 保存对话会话数据到Redis
-  //           await redis.set(
-  //             conversationKey,
-  //             JSON.stringify({
-  //               sender: e.sender,        // 发送者信息
-  //               ctime,                   // 创建时间
-  //               utime: ctime,            // 更新时间
-  //               num: 0,                  // 对话次数
-  //               conversation: {
-  //                 conversationId: {
-  //                   chatid: chatId.chatListId,  // 星火对话ID
-  //                   botid: botId                // 助手Bot ID
-  //                 }
-  //               }
-  //             }),
-  //             // 设置过期时间（如果配置了对话保存时间）
-  //             Config.conversationPreserveTime > 0 ? { EX: Config.conversationPreserveTime } : {}
-  //           )
-  //           // ==================== 成功反馈 ====================
-  //           // 向用户发送助手对话创建成功的确认消息
-  //           await this.reply(`成功创建助手对话\n助手名称：${botInfo.data.bot_name}\n助手描述：${botInfo.data.bot_desc}`, true)
-  //         } else {
-  //           // ==================== 创建失败处理 ====================
-  //           await this.reply(`创建助手对话失败,${botInfo.desc}`, true)
-  //         }
-  //       } else {
-  //         // ==================== 服务器响应异常 ====================
-  //         await this.reply('创建助手对话失败,服务器异常', true)
-  //       }
-  //     } catch (error) {
-  //       // ==================== 异常处理 ====================
-  //       await this.reply(`创建助手对话失败 ${error}`, true)
-  //     }
-  //   }
-  //   return true
-  // }
-
-  // /**
-  //  * ==================== 星火助手搜索功能 ====================
-  //  * 在星火平台上搜索可用的助手Bot
-  //  * 用户可以通过关键词查找感兴趣的助手
-  //  * 
-  //  * @param {object} e - 事件对象，包含用户消息和上下文信息
-  //  * @returns {Promise<boolean>} 返回操作结果
-  //  */
-  // async searchxhBot (e) {
-  //   // ==================== 提取搜索关键词 ====================
-  //   let searchBot = e.msg.replace(/^#星火(搜索|查找)助手/, '').trim()
-    
-  //   // ==================== 身份验证 ====================
-  //   const ssoSessionId = Config.xinghuoToken
-  //   if (!ssoSessionId) {
-  //     await this.reply('未绑定星火token，请使用#chatgpt设置星火token命令绑定token', true)
-  //     return true
-  //   }
-    
-  //   // ==================== 构建搜索请求 ====================
-  //   const cacheresOption = {
-  //     method: 'POST',
-  //     headers: {
-  //       'Content-Type': 'application/json',
-  //       Cookie: 'ssoSessionId=' + ssoSessionId + ';',  // 携带登录凭证
-  //       // 使用移动端User-Agent
-  //       'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/113.0.5672.69 Mobile/15E148 Safari/604.1'
-  //     },
-  //     body: JSON.stringify({
-  //       botType: '',      // 助手类型（空表示全部类型）
-  //       pageIndex: 1,     // 页码
-  //       pageSize: 45,     // 每页数量
-  //       searchValue: searchBot  // 搜索关键词
-  //     })
-  //   }
-    
-  //   // ==================== 发送搜索请求 ====================
-  //   const searchBots = await fetch('https://xinghuo.xfyun.cn/iflygpt/bot/page', cacheresOption)
-  //   const bots = await searchBots.json()
-    
-  //   // ==================== 调试信息输出 ====================
-  //   if (Config.debug) {
-  //     logger.info(bots)  // 调试模式下输出完整的搜索结果
-  //   }
-    
-  //   // ==================== 处理搜索结果 ====================
-  //   if (bots.code === 0) {
-  //     // 搜索成功
-  //     if (bots.data.pageList.length > 0) {
-  //       // ==================== 格式化搜索结果 ====================
-  //       // 将搜索到的助手信息格式化为转发消息
-  //       this.reply(await makeForwardMsg(this.e, bots.data.pageList.map(msg => `${msg.e.bot.botId} - ${msg.e.bot.botName}`)))
-  //     } else {
-  //       // 未找到相关助手
-  //       await this.reply('未查到相关助手', true)
-  //     }
-  //   } else {
-  //     // 搜索请求失败
-  //     await this.reply('搜索助手失败', true)
-  //   }
-  // }
-
   /**
    * ==================== 获取所有对话会话功能 ====================
    * 获取当前用户的所有ChatGPT对话会话列表
@@ -2569,189 +1666,9 @@ export class chatgpt extends plugin {///////////////////////////////////////////
   async getAllConversations (e) {
     // ==================== 检查当前使用模式 ====================
     const use = await redis.get('CHATGPT:USE')
-    // if (use === 'api3') {
-    //   // ==================== 获取用户对话列表 ====================
-    //   let conversations = await getConversations(e.sender.user_id, newFetch)
-      
-    //   // ==================== 调试信息输出 ====================
-    //   if (Config.debug) {
-    //     logger.mark('all conversations: ', conversations)
-    //   }
-      
-    //   // ==================== 渲染对话列表页面 ====================
-    //   // 使用模板引擎渲染对话列表页面并发送给用户
-    //   await render(e, 'chatgpt-plugin', 'conversation/chatgpt', {
-    //     conversations,  // 对话列表数据
-    //     version         // 插件版本信息
-    //   })
-      
-    //   // ==================== 生成文本格式的对话列表 ====================
-    //   let text = '对话列表\n'
-    //   text += '对话id | 对话发起者 \n'
-    //   conversations.forEach(c => {
-    //     text += c.id + '|' + (c.creater || '未知') + '\n'  // 格式化每个对话的基本信息
-    //   })
-    //   text += '您可以通过使用命令#chatgpt切换对话+对话id来切换到指定对话，也可以通过命令#chatgpt加入对话+@某人来加入指定人当前进行的对话中。'
-      
-    //   // ==================== 发送转发格式的对话列表 ====================
-    //   this.reply(await makeForwardMsg(e, [text], '对话列表'))
-    // } else {
-      // ==================== 非API3模式降级处理 ====================
-      // 对于其他模式，调用基础的对话获取功能
       return await this.getConversations(e)
     // }
   }
-
-  // /**
-  //  * ==================== 加入他人对话功能 ====================
-  //  * 允许用户加入其他人正在进行的ChatGPT对话会话
-  //  * 实现多人协作对话的功能
-  //  * 
-  //  * @param {object} e - 事件对象，包含用户消息和上下文信息
-  //  * @returns {Promise<boolean>} 返回操作结果
-  //  */
-  // async joinConversation (e) {
-  //   // ==================== 提取@目标用户 ====================
-  //   let ats = e.message.filter(m => m.type === 'at')  // 筛选出所有@消息
-  //   let use = await redis.get('CHATGPT:USE') || 'api'  // 获取当前使用的AI模式
-    
-  //   // ==================== 参数验证 ====================
-  //   if (ats.length === 0) {
-  //     await this.reply('指令错误，使用本指令时请同时@某人', true)
-  //     return false
-  //   } 
-  //   // else if (use === 'api3') {
-  //   //   // ==================== API3模式的加入对话处理 ====================
-  //   //   let at = ats[0]    // 获取第一个@目标
-  //   //   let qq = at.qq     // 提取目标用户的QQ号
-  //   //   let atUser = _.trimStart(at.text, '@')  // 清理@符号获取用户名
-  //   //   let conversationId = await redis.get(`CHATGPT:QQ_CONVERSATION:${qq}`)  // 获取目标用户的对话ID
-      
-  //   //   if (!conversationId) {
-  //   //     await this.reply(`该用户(${atUser})暂无进行中的对话`)
-  //   //     return false
-  //   //   }
-      
-  //   //   // ==================== 设置当前用户的对话ID ====================
-  //   //   await redis.set(`CHATGPT:QQ_CONVERSATION:${e.sender.user_id}`, conversationId)
-  //   //   await this.reply(`加入${atUser}的对话成功，当前对话id为` + conversationId)
-  //   // } 
-  //   else {
-  //     // ==================== 其他模式的加入对话处理 ====================
-  //     let at = ats[0]
-  //     let qq = at.qq
-  //     let atUser = _.trimStart(at.text, '@')
-      
-  //     // 直接复制目标用户的对话状态
-  //     let target = await redis.get('CHATGPT:CONVERSATIONS:' + qq)
-  //     await redis.set('CHATGPT:CONVERSATIONS:' + e.sender.user_id, target)
-  //     await this.reply(`加入${atUser}的对话成功`)
-  //   }
-  // }
-
-  // /**
-  //  * ==================== 切换对话会话功能 ====================
-  //  * 允许用户切换到指定ID的ChatGPT对话会话
-  //  * 用于在多个对话之间进行切换
-  //  * 
-  //  * @param {object} e - 事件对象，包含用户消息和上下文信息
-  //  * @returns {Promise<boolean>} 返回操作结果
-  //  */
-  // async attachConversation (e) {
-  //   // ==================== 模式检查 ====================
-  //   const use = await redis.get('CHATGPT:USE')
-  //   if (use !== 'api3') {
-  //     await this.reply('该功能目前仅支持API3模式')
-  //   } else {
-  //     // ==================== 提取对话ID ====================
-  //     let conversationId = _.trimStart(e.msg.trimStart(), '#chatgpt切换对话').trim()
-  //     if (!conversationId) {
-  //       await this.reply('无效对话id，请在#chatgpt切换对话后面加上对话id')
-  //       return false
-  //     }
-      
-  //     // ==================== 对话ID验证 ====================
-  //     // TODO: 验证这个对话是否存在且有效
-  //     // await getLatestMessageIdByConversationId(conversationId)
-      
-  //     // ==================== 设置新的对话ID ====================
-  //     await redis.set(`CHATGPT:QQ_CONVERSATION:${e.sender.user_id}`, conversationId)
-  //     await this.reply('切换成功')
-  //   }
-  // }
-
-  // /**
-  //  * ==================== 查询OpenAI API余额功能 ====================
-  //  * 查询当前API密钥的剩余额度和使用情况
-  //  * 仅限管理员使用，用于监控API费用和使用状况
-  //  * 
-  //  * @param {object} e - 事件对象，包含用户消息和上下文信息
-  //  * @returns {Promise} 返回余额查询结果
-  //  */
-  // async totalAvailable (e) {
-  //   // ==================== 查询订阅信息 ====================
-  //   // 查询OpenAI API剩余试用额度
-  //   let subscriptionRes = await newFetch(`${Config.openAiBaseUrl}/dashboard/billing/subscription`, {
-  //     method: 'GET',
-  //     headers: {
-  //       Authorization: 'Bearer ' + Config.apiKey
-  //     }
-  //   })
-
-  //   /**
-  //    * 获取查询时间范围的辅助函数
-  //    * @returns {object} 包含开始和结束日期的对象
-  //    */
-  //   function getDates () {
-  //     const today = new Date()
-  //     const tomorrow = new Date(today)
-  //     tomorrow.setDate(tomorrow.getDate() + 1)
-
-  //     const beforeTomorrow = new Date(tomorrow)
-  //     beforeTomorrow.setDate(beforeTomorrow.getDate() - 100)  // 查询过去100天
-
-  //     const tomorrowFormatted = formatDate2(tomorrow)
-  //     const beforeTomorrowFormatted = formatDate2(beforeTomorrow)
-
-  //     return {
-  //       end: tomorrowFormatted,
-  //       start: beforeTomorrowFormatted
-  //     }
-  //   }
-
-  //   // 解析订阅信息
-  //   let subscription = await subscriptionRes.json()
-  //   let {
-  //     hard_limit_usd: hardLimit,    // 硬限制额度
-  //     access_until: expiresAt       // 到期时间
-  //   } = subscription
-    
-  //   // 获取时间范围
-  //   const {
-  //     end,
-  //     start
-  //   } = getDates()
-    
-  //   // ==================== 查询使用情况 ====================
-  //   let usageRes = await newFetch(`${Config.openAiBaseUrl}/dashboard/billing/usage?start_date=${start}&end_date=${end}`, {
-  //     method: 'GET',
-  //     headers: {
-  //       Authorization: 'Bearer ' + Config.apiKey
-  //     }
-  //   })
-    
-  //   let usage = await usageRes.json()
-  //   const { total_usage: totalUsage } = usage  // 总使用量
-    
-  //   // 格式化到期时间
-  //   expiresAt = formatDate(new Date(expiresAt * 1000))
-    
-  //   // 计算剩余额度
-  //   let left = hardLimit - totalUsage / 100
-    
-  //   // 发送查询结果
-  //   this.reply('总额度：$' + hardLimit + '\n已经使用额度：$' + totalUsage / 100 + '\n当前剩余额度：$' + left + '\n到期日期(UTC)：' + expiresAt)
-  // }
 
   /**
    * ==================== 其他AI模式通用处理功能 ====================
