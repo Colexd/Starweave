@@ -1,0 +1,10 @@
+{
+  "enable": true,
+  "pluginName": "MyProject插件",
+  "version": "1.0.0",
+  "debug": false,
+  "allowGroups": [],
+  "allowUsers": [],
+  "cooldown": 5000,
+  "maxRetries": 3
+}

@@ -1,0 +1,50 @@
+{
+  "name": "example-usage",
+  "description": "示例：如何使用这个插件模板",
+  "steps": [
+    {
+      "step": 1,
+      "title": "复制模板",
+      "description": "将此模板复制到你的 Yunzai-Bot plugins 目录"
+    },
+    {
+      "step": 2,
+      "title": "修改基本信息",
+      "files": [
+        "package.json - 修改项目名称、作者等",
+        "README.md - 更新项目说明",
+        "guoba.support.js - 修改插件信息"
+      ]
+    },
+    {
+      "step": 3,
+      "title": "配置插件",
+      "actions": [
+        "复制 config/config.example.json 为 config/config.json",
+        "根据需要修改配置项"
+      ]
+    },
+    {
+      "step": 4,
+      "title": "开发功能",
+      "description": "在 apps/ 目录下创建功能模块"
+    }
+  ],
+  "examples": {
+    "simple_command": {
+      "description": "简单命令示例",
+      "code": "apps/example.js",
+      "triggers": ["#插件测试", "#插件帮助"]
+    },
+    "api_client": {
+      "description": "API客户端示例", 
+      "code": "client/BaseClient.js",
+      "features": ["HTTP请求", "错误处理", "重试机制"]
+    },
+    "configuration": {
+      "description": "配置管理示例",
+      "code": "utils/config.js", 
+      "features": ["配置读写", "权限检查", "热更新"]
+    }
+  }
+}
