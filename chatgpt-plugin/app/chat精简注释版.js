@@ -70,6 +70,16 @@ const pendingRequests = new Map();
 // ==================== 全局配置变量 ====================
 let version = Config.version // 插件版本号
 let proxy = getProxy()       // 代理配置
+
+// ==================== 关键词触发配置 ====================
+// 当消息包含这些关键词时，会像被@一样触发AI回复
+// 您可以根据需要修改、添加或删除关键词
+const TRIGGER_KEYWORDS = [
+  '小绘',        // 基础触发词
+  '星小绘bot'
+  // 您可以在这里继续添加更多关键词
+];
+
 /**
  * 每个对话保留的时长配置说明
  * 
@@ -184,6 +194,11 @@ export class chatgpt extends plugin {///////////////////////////////////////////
           reg: '^#保存语音',              // 语音合成并保存
           fnc: 'saveAudioCommand',
           permission: 'master'           // 需要主人权限
+        },
+        {
+          reg: '^#测试关键词',            // 测试关键词匹配功能
+          fnc: 'testKeywordMatching',
+          permission: 'master'           // 需要主人权限
         }
       ]
     })
@@ -280,6 +295,39 @@ export class chatgpt extends plugin {///////////////////////////////////////////
       logger.error('调用语音合成服务失败：', error)
       await this.reply('语音合成服务调用失败，请检查日志。', true)
     }
+    return true
+  }
+
+  /**
+   * 测试关键词匹配功能
+   * 处理 #测试关键词 命令，测试关键词匹配是否正常工作
+   * 
+   * @param {object} e - 事件对象
+   * @returns {boolean} - 是否成功处理
+   */
+  async testKeywordMatching (e) {
+    // 提取测试文本
+    let testText = e.msg.replace(/^#测试关键词\s*/, '').trim()
+
+    if (!testText) {
+      await this.reply('请输入要测试的文本，例如：#测试关键词 小绘你好', true)
+      return false
+    }
+
+    // 执行关键词匹配测试
+    const matchedKeywords = TRIGGER_KEYWORDS.filter(keyword => 
+      testText.toLowerCase().includes(keyword.toLowerCase())
+    );
+    const containsTriggerKeyword = matchedKeywords.length > 0;
+
+    // 返回测试结果
+    const result = `测试文本: "${testText}"\n` +
+                  `配置的关键词: [${TRIGGER_KEYWORDS.join(', ')}]\n` +
+                  `匹配结果: ${containsTriggerKeyword ? '✅ 匹配成功' : '❌ 未匹配'}\n` +
+                  `匹配的关键词: [${matchedKeywords.join(', ')}]\n` +
+                  `当前模式: ${this.toggleMode}`;
+
+    await this.reply(result, true)
     return true
   }
 
@@ -606,16 +654,35 @@ export class chatgpt extends plugin {///////////////////////////////////////////
     }
     
     // ==================== 消息预处理 ====================
-    if (this.toggleMode === 'at') {// 艾特模式：只响应艾特机器人的消息
+    // 检查消息是否包含触发关键词（先确保msg存在且为字符串）
+    const matchedKeywords = (msg && typeof msg === 'string') ? TRIGGER_KEYWORDS.filter(keyword => 
+      msg.toLowerCase().includes(keyword.toLowerCase())
+    ) : [];
+    const containsTriggerKeyword = matchedKeywords.length > 0;
+    
+    // 添加详细的匹配日志
+    if (containsTriggerKeyword) {
+      logger.info(`[ChatGPT] 关键词匹配检测: 用户 ${e.sender.user_id} 消息 "${msg}" 匹配到关键词: [${matchedKeywords.join(', ')}]`)
+    }
+    
+    if (this.toggleMode === 'at') {// 艾特模式：只响应艾特机器人的消息或包含关键词的消息
       if (!msg || e.msg?.startsWith('#')) {
         return false  // 忽略空消息或命令消息
       }
-      if ((e.isGroup || e.group_id) && !(e.atme || e.atBot || (e.at === e.self_id))) {
-        return false  // 群聊中必须艾特机器人
+      
+      // 修改条件：艾特机器人 OR 包含触发关键词
+      if ((e.isGroup || e.group_id) && !(e.atme || e.atBot || (e.at === e.self_id) || containsTriggerKeyword)) {
+        return false  // 群聊中必须艾特机器人或包含触发关键词
       }
+      
       if (e.user_id == getUin(e)) return false  // 忽略机器人自己的消息
       
       prompt = msg.trim()
+      
+      // 如果是通过关键词触发（而非艾特），添加日志记录
+      if (containsTriggerKeyword && !(e.atme || e.atBot || (e.at === e.self_id))) {
+        logger.info(`[ChatGPT] 通过关键词触发: 用户 ${e.sender.user_id} 发送消息包含触发词`)
+      }
       
       // 处理群聊中的艾特信息，移除艾特文本
       try {

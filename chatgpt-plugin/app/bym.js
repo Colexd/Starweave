@@ -74,11 +74,9 @@ export class bym extends plugin {
     }
 
     //概率符合要求，则进行伪人回复，同时，当消息里面带有"小绘"的时候也进行回复
-    if (prop < Config.bymRate || e.msg?.includes('小绘')) {
+    // if (prop < Config.bymRate || e.msg?.includes('小绘')) {
+    if (prop < Config.bymRate) {
       logger.info('[BYM] 随机聊天命中1');
-      if (e.msg?.includes('小绘')) {
-        logger.info('[BYM] 检测到北教');
-      }
       // let chats = await getChatHistoryGroup(e, Config.groupContextLength) // 获取群聊历史记录
       let system = `你的名字是"${Config.assistantLabel}"，你在一个qq群里，群号是${group},当前说话的人群名片是${card}, qq号是${sender}, 
       请你结合用户的发言和聊天记录随意说话，要求表现得随性一点，最好参与讨论，混入其中（因为他不一定是跟你说的)。不要过分插科打诨，不知道说什么可以复读群友的话。
