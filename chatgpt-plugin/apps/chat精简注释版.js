@@ -544,7 +544,7 @@ export class chatgpt extends plugin {///////////////////////////////////////////
     if (e.source) {
       // logger.info(`[ChatGPT Debug] source详情: ${JSON.stringify(e.source)}`)
     }
-    
+     
     // ==================== 消息预处理 ====================
     // 检查消息是否包含触发关键词（先确保msg存在且为字符串）
     const matchedKeywords = (msg && typeof msg === 'string') ? TRIGGER_KEYWORDS.filter(keyword => 
