@@ -20,7 +20,6 @@ import {
   render,              // 模板渲染
   renderUrl            // URL 渲染为图片
 } from '../utils/common.js'
-
 import fetch from 'node-fetch' // HTTP 请求库
 import { deleteConversation, getConversations, getLatestMessageIdByConversationId } from '../utils/conversation.js' // 对话管理相关函数
 import { ConversationManager, originalValues } from '../model/conversation.js' // 对话管理器类
@@ -36,60 +35,90 @@ import { convertFaces } from '../utils/face.js'; // 表情转换处理工具
 import moment from 'moment'; // 时间日期处理库
 
 // ==================== 全局变量定义区域 ====================
-
-// 用于 ES 模块中的 __dirname 获取
 const __filename = fileURLToPath(import.meta.url); // 当前文件的绝对路径
 const __dirname = path.dirname(__filename); // 当前文件所在目录的绝对路径
-
-/**
- * 消息缓冲区 - 存储每个用户/群的消息缓冲和定时器
- * Key: 对话唯一标识 (user_${userId} 或 group_${groupId})
- * Value: { 
- *   messages: string[],           // 缓冲的消息数组
- *   timer: NodeJS.Timeout | null, // 定时器实例
- *   e: any,                       // 最新的事件对象
- *   use: string,                  // 使用的 AI 模型
- *   forcePictureMode: boolean     // 是否强制图片模式
- * }
- */
-const chatMessageBuffers = new Map();
-
-/**
- * 中断标志映射 - 用于标记对话是否被中断
- * Key: 对话唯一标识
- * Value: boolean (true=中断, false=正常)
- */
-const interruptionFlags = new Map();
-
-/**
- * 挂起请求映射 - 用于跟踪正在处理的请求
- * Key: 对话唯一标识
- * Value: 请求ID字符串
- */
-const pendingRequests = new Map();
+const chatMessageBuffers = new Map();//消息缓冲区 - 存储每个用户/群的消息缓冲和定时器
+const interruptionFlags = new Map();//中断标志映射 - 用于标记对话是否被中断
+const pendingRequests = new Map();//挂起请求映射 - 用于跟踪正在处理的请求
+const userContinuationStates = new Map();//用户续接对话状态 - 跟踪最近与AI交互的用户，允许续接对话
 // ==================== 全局配置变量 ====================
 let version = Config.version // 插件版本号
 let proxy = getProxy()       // 代理配置
-
 // ==================== 关键词触发配置 ====================
 // 当消息包含这些关键词时，会像被@一样触发AI回复
 // 您可以根据需要修改、添加或删除关键词
 const TRIGGER_KEYWORDS = [
   '小绘',        // 基础触发词
   '星小绘bot'
-  // 您可以在这里继续添加更多关键词
 ];
 
+// ==================== 续接对话配置 ====================
+// 用户在触发关键词或被@后，可以续接对话的时间窗口（毫秒）
+const CONTINUATION_TIMEOUT = 5 * 60 * 1000; // 5分钟
+
 /**
- * 每个对话保留的时长配置说明
- * 
- * 单个对话内 AI 会保留上下文，超时后销毁对话，再次对话时创建新的对话。
- * 单位：秒
- * 
- * 这里使用动态数据获取，以便于锅巴动态更新数据
- * @type {number}
+ * 设置用户续接对话状态
+ * @param {string} conversationKey - 对话键
+ * @param {number} userId - 用户ID
  */
-// const CONVERSATION_PRESERVE_TIME = Config.conversationPreserveTime
+const setUserContinuationState = (conversationKey, userId) => {
+  const now = Date.now();
+  if (!userContinuationStates.has(conversationKey)) {
+    userContinuationStates.set(conversationKey, new Map());
+  }
+  userContinuationStates.get(conversationKey).set(userId, now);
+  
+  // 清理过期的状态
+  setTimeout(() => {
+    if (userContinuationStates.has(conversationKey)) {
+      const states = userContinuationStates.get(conversationKey);
+      if (states.has(userId) && states.get(userId) === now) {
+        states.delete(userId);
+        if (states.size === 0) {
+          userContinuationStates.delete(conversationKey);
+        }
+      }
+    }
+  }, CONTINUATION_TIMEOUT);
+};
+
+/**
+ * 检查用户是否可以续接对话
+ * @param {string} conversationKey - 对话键
+ * @param {number} userId - 用户ID
+ * @returns {boolean} - 是否可以续接对话
+ */
+const canUserContinue = (conversationKey, userId) => {
+  if (!userContinuationStates.has(conversationKey)) {
+    return false;
+  }
+  const states = userContinuationStates.get(conversationKey);
+  if (!states.has(userId)) {
+    return false;
+  }
+  const timestamp = states.get(userId);
+  const now = Date.now();
+  return (now - timestamp) < CONTINUATION_TIMEOUT;
+};
+
+/**
+ * 清除用户续接对话状态
+ * @param {string} conversationKey - 对话键
+ * @param {number} userId - 用户ID
+ */
+const clearUserContinuationState = (conversationKey, userId) => {
+  if (userContinuationStates.has(conversationKey)) {
+    const states = userContinuationStates.get(conversationKey);
+    if (states.has(userId)) {
+      states.delete(userId);
+      logger.info(`[ChatGPT] 已清除用户 ${userId} 的续接对话状态`);
+      if (states.size === 0) {
+        userContinuationStates.delete(conversationKey);
+      }
+    }
+  }
+};
+
 /**
  * 带代理的 fetch 函数
  * 根据配置决定是否使用代理进行网络请求
@@ -115,33 +144,22 @@ const newFetch = (url, options = {}) => {
   return fetch(url, mergedOptions)
 }
 
-/**
- * ChatGPT 插件主类
- * 继承自 Yunzai 的插件基类，实现各种 AI 对话功能
- * 
- * 主要功能：
- * - 处理用户消息并调用相应的 AI 模型
- * - 支持多种回复模式（文本、图片、语音）
- * - 管理对话上下文和会话状态
- * - 处理特殊指令和功能
- */
-export class chatgpt extends plugin {////////////////////////////////////////////////////////////////////////////////////////////////////
+
+export class chatgpt extends plugin {///////////////////////////////////// * ChatGPT 插件主类 * 继承自 Yunzai 的插件基类
   task = [] // 任务队列，确保 task 属性被初始化为空数组
   
   /**
    * 构造函数 - 初始化插件配置和规则
    * @param {object} e - 事件对象
    */
-  constructor (e) {/////////////////////////////////////////////////////////////////  
+  constructor (e) {/////////////////////////////////////////////////////////////////初始化插件配置和规则
+
     let toggleMode = Config.toggleMode // 获取切换模式配置
     super({
-      /** 功能名称 */
       name: 'ChatGpt 对话',
-      /** 功能描述 */
       dsc: '与人工智能对话，畅聊无限可能~',
-      event: 'message', // 监听消息事件
-      /** 优先级，数字越小等级越高 */
-      priority: 1144,
+      event: 'message',
+      priority: 1144,/** 优先级，数字越小等级越高 */
       rule: [
         // ==================== 时间查询规则 ====================
         {
@@ -155,7 +173,6 @@ export class chatgpt extends plugin {///////////////////////////////////////////
           fnc: 'chatgpt',  // 默认聊天处理函数
           log: false       // 不记录日志
         },
-        
         // ==================== 对话管理规则 ====================
         {
           reg: '^#(chatgpt)?对话列表$',  // 查看对话列表
@@ -173,7 +190,6 @@ export class chatgpt extends plugin {///////////////////////////////////////////
           fnc: 'endAllConversations',
           permission: 'master'           // 需要主人权限
         },
-        
         // ==================== 回复模式切换规则 ====================
         // {
         //   reg: '#chatgpt帮助',           // 帮助命令（已注释）
@@ -187,9 +203,7 @@ export class chatgpt extends plugin {///////////////////////////////////////////
           reg: '^#chatgpt文本模式$',      // 切换到文本回复模式
           fnc: 'switch2Text'
         },
-
         // ==================== 管理功能规则 ====================
-
         {
           reg: '^#保存语音',              // 语音合成并保存
           fnc: 'saveAudioCommand',
@@ -516,6 +530,9 @@ export class chatgpt extends plugin {///////////////////////////////////////////
     let prompt                 // 将要发送给AI的提示文本
     let forcePictureMode = false  // 是否强制使用图片模式回复
     
+    // 生成对话键，用于消息缓冲和续接对话
+    const conversationKey = e.isGroup && Config.groupMerge ? `group_${e.group_id}` : `user_${e.sender.user_id}`;
+    
     // ==================== 回复消息处理逻辑 ====================
     let replyContent = ''  // 存储被回复消息的内容
 
@@ -540,10 +557,6 @@ export class chatgpt extends plugin {///////////////////////////////////////////
         // logger.info(`[ChatGPT Debug] 从message中找到reply段: ${JSON.stringify(replySegment)}`)
       }
     }
-    
-    if (e.source) {
-      // logger.info(`[ChatGPT Debug] source详情: ${JSON.stringify(e.source)}`)
-    }
      
     // ==================== 消息预处理 ====================
     // 检查消息是否包含触发关键词（先确保msg存在且为字符串）
@@ -552,34 +565,45 @@ export class chatgpt extends plugin {///////////////////////////////////////////
     ) : [];
     const containsTriggerKeyword = matchedKeywords.length > 0;
     
+    // 检查用户续接状态
+    const canContinue = canUserContinue(conversationKey, e.sender.user_id);
+    
     // 添加详细的匹配日志
     if (containsTriggerKeyword) {
       logger.info(`[ChatGPT] 关键词匹配检测: 用户 ${e.sender.user_id} 消息 "${msg}" 匹配到关键词: [${matchedKeywords.join(', ')}]`)
     }
     
+    if (canContinue) {
+      logger.info(`[ChatGPT] 续接对话检测: 用户 ${e.sender.user_id} 可以续接对话`)
+    }
+    
     // ==================== 处理回复消息的多种方式 ====================
-    // 修改检测条件，支持多种回复消息格式
-    if ((e.source || replySegment) && (e.atme || e.atBot || e.isPrivate || containsTriggerKeyword)) {
+    if ((e.source || replySegment) && (e.atme || e.atBot || e.isPrivate || containsTriggerKeyword || canContinue)) {
       replyContent = await this.quoteReply(e, replySegment)
     }
     
-    if (this.toggleMode === 'at') {// 艾特模式：只响应艾特机器人的消息或包含关键词的消息
+    // if (this.toggleMode === 'at') {// 艾特模式：只响应艾特机器人的消息或包含关键词的消息
       if (!msg || e.msg?.startsWith('#')) {
         return false  // 忽略空消息或命令消息
       }
       
-      // 修改条件：艾特机器人 OR 包含触发关键词
-      if ((e.isGroup || e.group_id) && !(e.atme || e.atBot || (e.at === e.self_id) || containsTriggerKeyword)) {
-        return false  // 群聊中必须艾特机器人或包含触发关键词
+      // 修改条件：艾特机器人、包含触发关键词或者可以续接对话
+      if ((e.isGroup || e.group_id) && !(e.atme || e.atBot || (e.at === e.self_id) || containsTriggerKeyword || canContinue)) {
+        return false  // 群聊中必须艾特机器人、包含触发关键词或可以续接对话
       }
       
       if (e.user_id == getUin(e)) return false  // 忽略机器人自己的消息
-      
-      prompt = msg.trim()
-      
+
+      prompt = msg.trim()//这一步是为了去除多余空格
+
       // 如果是通过关键词触发（而非艾特），添加日志记录
-      if (containsTriggerKeyword && !(e.atme || e.atBot || (e.at === e.self_id))) {
+      if (containsTriggerKeyword && !(e.atme || e.atBot || (e.at === e.self_id))) { 
         logger.info(`[ChatGPT] 通过关键词触发: 用户 ${e.sender.user_id} 发送消息包含触发词`)
+      }
+      
+      // 如果是通过续接对话触发，添加日志记录
+      if (canContinue && !(e.atme || e.atBot || (e.at === e.self_id) || containsTriggerKeyword)) {
+        logger.info(`[ChatGPT] 通过续接对话触发: 用户 ${e.sender.user_id} 在对话窗口期内续接对话`)
       }
       
       // 处理群聊中的艾特信息，移除艾特文本
@@ -617,43 +641,43 @@ export class chatgpt extends plugin {///////////////////////////////////////////
       } catch (err) {
         logger.warn(err)
       }
-    } else {// 命令模式：通过#chat触发或触发关键词
+    // } else {// 命令模式：通过#chat触发或触发关键词
       
-      let ats = e.message.filter(m => m.type === 'at')  // 获取艾特列表
+    //   let ats = e.message.filter(m => m.type === 'at')  // 获取艾特列表
       
-      // 检查是否为#chat命令
-      const isChatCommand = e.msg.trimStart().startsWith('#chat') || e.msg.trimStart().startsWith('#图片chat')
+    //   // 检查是否为#chat命令
+    //   const isChatCommand = e.msg.trimStart().startsWith('#chat') || e.msg.trimStart().startsWith('#图片chat')
       
-      // 如果不是#chat命令也不包含触发关键词，则不处理
-      if (!isChatCommand && !containsTriggerKeyword) {
-        return false
-      }
+    //   // 如果不是#chat命令也不包含触发关键词，则不处理
+    //   if (!isChatCommand && !containsTriggerKeyword) {
+    //     return false
+    //   }
       
-      if (!(e.atme || e.atBot || containsTriggerKeyword) && ats.length > 0) {
-        if (Config.debug) {
-          logger.mark('艾特别人了，没艾特我也没有触发关键词，忽略')
-        }
-        return false
-      }
+    //   if (!(e.atme || e.atBot || containsTriggerKeyword) && ats.length > 0) {
+    //     if (Config.debug) {
+    //       logger.mark('艾特别人了，没艾特我也没有触发关键词，忽略')
+    //     }
+    //     return false
+    //   }
       
-      // 检查是否为图片模式
-      if (e.msg.trimStart().startsWith('#图片chat')) {
-        forcePictureMode = true
-      }
+    //   // 检查是否为图片模式
+    //   if (e.msg.trimStart().startsWith('#图片chat')) {
+    //     forcePictureMode = true
+    //   }
       
-      // 提取命令后的内容
-      if (isChatCommand) {
-        prompt = _.replace(e.msg.trimStart(), /#(图片)?chat/, '').trim()
-      } else if (containsTriggerKeyword) {
-        // 如果是通过关键词触发，使用完整消息内容
-        prompt = msg.trim()
-        logger.info(`[ChatGPT] 命令模式通过关键词触发: 用户 ${e.sender.user_id} 发送消息包含触发词`)
-      }
+    //   // 提取命令后的内容
+    //   if (isChatCommand) {
+    //     prompt = _.replace(e.msg.trimStart(), /#(图片)?chat/, '').trim()
+    //   } else if (containsTriggerKeyword) {
+    //     // 如果是通过关键词触发，使用完整消息内容
+    //     prompt = msg.trim()
+    //     logger.info(`[ChatGPT] 命令模式通过关键词触发: 用户 ${e.sender.user_id} 发送消息包含触发词`)
+    //   }
       
-      if (prompt.length === 0) {
-        return false  // 空内容不处理
-      }
-    }
+    //   if (prompt.length === 0) {
+    //     return false  // 空内容不处理
+    //   }
+    // }
     
     let groupId = e.isGroup ? e.group.group_id : ''  // 群号（如果是群聊）
 
@@ -673,56 +697,10 @@ export class chatgpt extends plugin {///////////////////////////////////////////
     }
 
     // ==================== 黑白名单过滤 ====================
-    let [whitelist = [], blacklist = []] = [Config.whitelist, Config.blacklist]
-    let chatPermission = false // 对话许可状态
-    
-    if (typeof whitelist === 'string') {// 统一处理名单格式
-      whitelist = [whitelist]
-    }
-    if (typeof blacklist === 'string') {
-      blacklist = [blacklist]
-    }
-    if (whitelist.join('').length > 0) {// 白名单检查
-      for (const item of whitelist) {
-        if (item.length > 11) {
-          // 格式：群号^用户QQ（特定群的特定用户）
-          const [group, qq] = item.split('^')
-          if (e.isGroup && group === e.group_id.toString() && qq === e.sender.user_id.toString()) {
-            chatPermission = true
-            break
-          }
-        } else if (item.startsWith('^') && item.slice(1) === e.sender.user_id.toString()) {
-          // 格式：^用户QQ（任意位置的特定用户）
-          chatPermission = true
-          break
-        } else if (e.isGroup && !item.startsWith('^') && item === e.group_id.toString()) {
-          // 格式：群号（整个群）
-          chatPermission = true
-          break
-        }
-      }
-    }
-    
-    if (!chatPermission) {// 黑名单检查（仅在没有白名单权限时进行）
-      if (blacklist.join('').length > 0) {
-        for (const item of blacklist) {
-          if (e.isGroup && !item.startsWith('^') && item === e.group_id.toString()) {
-            logger.info(`[ChatGPT] 消息命中黑名单群组，忽略。群ID: ${e.group_id}`)
-            return false
-          }
-          if (item.startsWith('^') && item.slice(1) === e.sender.user_id.toString()) {
-            logger.info(`[ChatGPT] 消息命中黑名单用户，忽略。用户ID: ${e.sender.user_id}`)
-            return false
-          }
-          if (item.length > 11) {
-            const [group, qq] = item.split('^')
-            if (e.isGroup && group === e.group_id.toString() && qq === e.sender.user_id.toString()) {
-              logger.info(`[ChatGPT] 消息命中黑名单特定用户，忽略。群ID: ${e.group_id}, 用户ID: ${e.sender.user_id}`)
-              return false
-            }
-          }
-        }
-      }
+    const permissionCheck = checkChatPermission(e)
+    if (!permissionCheck.allowed) {
+      logger.info(`[ChatGPT] ${permissionCheck.reason}`)
+      return false
     }
 
     // ==================== 屏蔽词检查 ====================
@@ -750,7 +728,6 @@ export class chatgpt extends plugin {///////////////////////////////////////////
 
     // ==================== 消息缓冲和延迟处理机制 ====================
     // 【恢复】消息缓冲和等待机制 (回到之前5秒延迟的模式)
-    const conversationKey = e.isGroup && Config.groupMerge ? `group_${e.group_id}` : `user_${e.sender.user_id}`;
     
     // 设置中断标志
     interruptionFlags.set(conversationKey, true);
@@ -778,10 +755,20 @@ export class chatgpt extends plugin {///////////////////////////////////////////
     buffer.messages.push(prompt);
     logger.info(`[ChatGPT Debug] 消息已缓冲， 当前缓冲消息数: ${buffer.messages.length}, 消息内容: '${prompt}'`);
 
+    // 设置用户续接对话状态，允许后续消息无需关键词或@触发
+    setUserContinuationState(conversationKey, e.sender.user_id);
+
     // 清除任何现有的定时器
     if (buffer.timer) {
         clearTimeout(buffer.timer);
-        logger.info(`[ChatGPT Debug] 重置定时器，消息内容: ${prompt}`);
+        
+        // 提取所有消息的用户消息部分，用于日志显示
+        const userMessages = buffer.messages.map(msg => {
+          const userContentMatch = msg.match(/用户消息：(.*)$/);
+          return userContentMatch ? userContentMatch[1] : msg;
+        });
+        
+        logger.info(`[ChatGPT Debug] 重置定时器，当前消息: ${userMessages[userMessages.length - 1]}，合并后用户消息: ${userMessages.join(' ')}`);
     }
 
     // ==================== 智能等待时间计算 ====================
@@ -813,9 +800,9 @@ export class chatgpt extends plugin {///////////////////////////////////////////
         // 只有一条消息时直接使用
         combinedPrompt = currentBuffer.messages[0];
       } else {
-        // 多条消息时，提取最后一条消息的前缀和所有消息的用户内容
-        const lastMessage = currentBuffer.messages[currentBuffer.messages.length - 1];
-        const prefixMatch = lastMessage.match(/^(当前日期时间：.*?用户消息：)/);
+        // 多条消息时，提取第一条消息的前缀和所有消息的用户内容
+        const firstMessage = currentBuffer.messages[0];
+        const prefixMatch = firstMessage.match(/^(当前日期时间：.*?用户消息：)/);
         
         if (prefixMatch) {
           const prefix = prefixMatch[1];
@@ -1494,7 +1481,15 @@ export class chatgpt extends plugin {///////////////////////////////////////////
           await this.renderImage(e, use, `出现异常,错误信息如下 \n \`\`\`${errorMessage}\`\`\``, prompt)
         }
       }
+      
+      // ==================== 清除续接对话状态（错误情况） ====================
+      // 即使出现错误，也要清除用户的续接对话状态
+      clearUserContinuationState(conversationKey, e.sender.user_id);
     }
+    
+    // ==================== 清除续接对话状态 ====================
+    // AI响应完成后，清除用户的续接对话状态，要求下次必须重新使用关键词或@触发
+    clearUserContinuationState(conversationKey, e.sender.user_id);
   }
 
   // ================================================
@@ -1805,5 +1800,89 @@ export class chatgpt extends plugin {///////////////////////////////////////////
     // 调用抽象聊天处理函数进行实际的AI对话
     await this.abstractChat(e, prompt, mode, forcePictureMode)
     return true
+  }
+}
+
+/**
+ * 黑白名单权限检查函数
+ * 检查用户是否有权限进行ChatGPT对话
+ * 
+ * @param {object} e - 事件对象，包含用户和群组信息
+ * @returns {object} 返回检查结果 {allowed: boolean, reason: string}
+ */
+function checkChatPermission(e) {
+  // ==================== 获取配置的黑白名单 ====================
+  let [whitelist = [], blacklist = []] = [Config.whitelist, Config.blacklist]
+  let chatPermission = false // 对话许可状态
+  
+  // ==================== 统一处理名单格式 ====================
+  if (typeof whitelist === 'string') {
+    whitelist = [whitelist]
+  }
+  if (typeof blacklist === 'string') {
+    blacklist = [blacklist]
+  }
+  
+  // ==================== 白名单检查 ====================
+  if (whitelist.join('').length > 0) {
+    for (const item of whitelist) {
+      if (item.length > 11) {
+        // 格式：群号^用户QQ（特定群的特定用户）
+        const [group, qq] = item.split('^')
+        if (e.isGroup && group === e.group_id.toString() && qq === e.sender.user_id.toString()) {
+          chatPermission = true
+          break
+        }
+      } else if (item.startsWith('^') && item.slice(1) === e.sender.user_id.toString()) {
+        // 格式：^用户QQ（任意位置的特定用户）
+        chatPermission = true
+        break
+      } else if (e.isGroup && !item.startsWith('^') && item === e.group_id.toString()) {
+        // 格式：群号（整个群）
+        chatPermission = true
+        break
+      }
+    }
+    
+    // 如果有白名单配置但用户不在白名单中，拒绝访问
+    if (!chatPermission) {
+      return {
+        allowed: false,
+        reason: `用户不在白名单中。用户ID: ${e.sender.user_id}${e.isGroup ? `, 群ID: ${e.group_id}` : ''}`
+      }
+    }
+  }
+  
+  // ==================== 黑名单检查（仅在没有白名单权限时进行） ====================
+  if (!chatPermission && blacklist.join('').length > 0) {
+    for (const item of blacklist) {
+      if (e.isGroup && !item.startsWith('^') && item === e.group_id.toString()) {
+        return {
+          allowed: false,
+          reason: `消息命中黑名单群组，忽略。群ID: ${e.group_id}`
+        }
+      }
+      if (item.startsWith('^') && item.slice(1) === e.sender.user_id.toString()) {
+        return {
+          allowed: false,
+          reason: `消息命中黑名单用户，忽略。用户ID: ${e.sender.user_id}`
+        }
+      }
+      if (item.length > 11) {
+        const [group, qq] = item.split('^')
+        if (e.isGroup && group === e.group_id.toString() && qq === e.sender.user_id.toString()) {
+          return {
+            allowed: false,
+            reason: `消息命中黑名单特定用户，忽略。群ID: ${e.group_id}, 用户ID: ${e.sender.user_id}`
+          }
+        }
+      }
+    }
+  }
+  
+  // ==================== 权限检查通过 ====================
+  return {
+    allowed: true,
+    reason: chatPermission ? '用户在白名单中' : '无黑白名单限制'
   }
 }
