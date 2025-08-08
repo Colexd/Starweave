@@ -80,6 +80,7 @@ export class Greet extends plugin {
     this.scanInterval = null // 用于存储 45秒扫描定时器的句柄
     this.hourlyInterval = null // 用于存储每小时更新定时器的句柄
     this.bot = null // 用于存储机器人实例，以便发送消息
+    this.lastGreetingTime = null // 记录上次问候的时间，防止重复发送
     
     // 全局问候消息模板
     this.greetingMessageTemplate = `【system】现在的时间是：{currentTime}，触发了主动聊天事件。（这条消息不用发表情和定时命令）
@@ -324,7 +325,17 @@ export class Greet extends plugin {
     
     // 检查当前时间的分钟是否匹配
     if (now.getHours() === scheduledTime.getHours() && now.getMinutes() === scheduledTime.getMinutes()) {
+      // 防重复发送：检查是否在同一分钟内已经发送过
+      const currentTimeKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`;
+      if (this.lastGreetingTime === currentTimeKey) {
+        console.log(`[定时问候] 该分钟内已发送过问候，跳过重复发送。时间: ${now.toLocaleString('zh-CN')}`);
+        return;
+      }
+      
       console.log(`[定时问候] 时间匹配！当前时间: ${now.toLocaleString('zh-CN')}, 计划时间: ${scheduledTime.toLocaleString('zh-CN')}`);
+      
+      // 记录此次问候时间，防止重复
+      this.lastGreetingTime = currentTimeKey;
       
       // 执行问候
       await this.executeGreetingToAllUsers();
