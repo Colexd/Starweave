@@ -150,7 +150,7 @@ export class chatgpt extends plugin {///////////////////////////////////////////
         },
         // ==================== 默认聊天规则 ====================
         {
-          // 根据切换模式决定是艾特触发还是 #chat 触发
+          // 根据切换模式决定是艾特触发还是 #chat 触发，如果是at模式则使用at触发，如果是chat模式则使用chat触发
           reg: toggleMode === 'at' ? '^[^#][sS]*' : '^#(图片)?chat[^gpt][sS]*',
           fnc: 'chatgpt',  // 默认聊天处理函数
           log: false       // 不记录日志
@@ -206,41 +206,41 @@ export class chatgpt extends plugin {///////////////////////////////////////////
     // 保存切换模式配置到实例
     this.toggleMode = toggleMode
     
-    /**
-     * 自定义回复函数
-     * 支持 Markdown 渲染和按钮功能
-     * 
-     * @param {string|array} msg - 要发送的消息内容
-     * @param {boolean} quote - 是否引用原消息
-     * @param {object} data - 附加数据（如按钮信息）
-     */
-    this.reply = async (msg, quote, data) => {
-      // 如果未启用 Markdown，直接使用原生回复
-      if (!Config.enableMd) {
-        return e.reply(msg, quote, data)
-      }
+    // /**
+    //  * 自定义回复函数
+    //  * 支持 Markdown 渲染和按钮功能
+    //  * 
+    //  * @param {string|array} msg - 要发送的消息内容
+    //  * @param {boolean} quote - 是否引用原消息
+    //  * @param {object} data - 附加数据（如按钮信息）
+    //  */
+    // this.reply = async (msg, quote, data) => {
+    //   // 如果未启用 Markdown，直接使用原生回复
+    //   if (!Config.enableMd) {
+    //     return e.reply(msg, quote, data)
+    //   }
       
-      // 获取运行时处理器
-      let handler = e.runtime?.handler || {}
+    //   // 获取运行时处理器
+    //   let handler = e.runtime?.handler || {}
       
-      // 调用按钮后处理器，生成按钮元素
-      const btns = await handler.call('chatgpt.button.post', this.e, data)
-      if (btns) {
-        const btnElement = {
-          type: 'button',    // 按钮类型
-          content: btns      // 按钮内容
-        }
+    //   // 调用按钮后处理器，生成按钮元素
+    //   const btns = await handler.call('chatgpt.button.post', this.e, data)
+    //   if (btns) {
+    //     const btnElement = {
+    //       type: 'button',    // 按钮类型
+    //       content: btns      // 按钮内容
+    //     }
         
-        // 将按钮添加到消息中
-        if (Array.isArray(msg)) {
-          msg.push(btnElement)  // 消息是数组，直接添加
-        } else {
-          msg = [msg, btnElement]  // 消息是字符串，转为数组后添加
-        }
-      }
+    //     // 将按钮添加到消息中
+    //     if (Array.isArray(msg)) {
+    //       msg.push(btnElement)  // 消息是数组，直接添加
+    //     } else {
+    //       msg = [msg, btnElement]  // 消息是字符串，转为数组后添加
+    //     }
+    //   }
 
-      return e.reply(msg, quote, data)
-    }
+    //   return e.reply(msg, quote, data)
+    // }
   }
 
   /**
@@ -507,13 +507,7 @@ export class chatgpt extends plugin {///////////////////////////////////////////
 
   /**
    * 主要的聊天处理函数
-   * 
-   * 这是插件的核心函数，负责：
-   * 1. 处理用户消息和回复消息
-   * 2. 实现消息缓冲机制
-   * 3. 处理权限验证和黑白名单
-   * 4. 调用AI进行对话
-   * 
+  * 处理用户消息，调用AI模型生成回复
    * @param {object} e - 事件对象，包含消息信息
    * @returns {boolean} - 是否成功处理消息
    */
@@ -524,10 +518,7 @@ export class chatgpt extends plugin {///////////////////////////////////////////
     
     // ==================== 回复消息处理逻辑 ====================
     let replyContent = ''  // 存储被回复消息的内容
-    
-    // 添加调试日志
-    // logger.info(`[ChatGPT Debug] 回复检测 - e.source: ${e.source ? 'exists' : 'null'}, e.atme: ${e.atme}, e.atBot: ${e.atBot}`)
-    
+
     // 安全地输出消息对象的关键信息，避免循环引用
     const safeMessageInfo = {
       msg: e.msg,
@@ -540,7 +531,6 @@ export class chatgpt extends plugin {///////////////////////////////////////////
       atBot: e.atBot,
       raw_message: e.raw_message
     }
-    // logger.info(`[ChatGPT Debug] 消息关键信息: ${JSON.stringify(safeMessageInfo, null, 2)}`)
     
     // 尝试从消息中直接提取回复信息
     let replySegment = null
@@ -555,104 +545,6 @@ export class chatgpt extends plugin {///////////////////////////////////////////
       // logger.info(`[ChatGPT Debug] source详情: ${JSON.stringify(e.source)}`)
     }
     
-    // ==================== 处理回复消息的多种方式 ====================
-    // 修改检测条件，支持多种回复消息格式
-    if ((e.source || replySegment) && (e.atme || e.atBot)) {
-      try {
-        logger.info(`[ChatGPT Debug] 开始处理回复消息`)
-        
-        let originalMessage = null
-        
-        
-        if (e.source) {// 方式1：通过e.source获取历史消息
-          let replyMsg = null
-          if (e.isGroup) {
-            replyMsg = await e.group.getChatHistory(e.source.seq, 1)
-          } else {
-            replyMsg = await e.friend.getChatHistory(e.source.seq, 1)
-          }
-          
-          if (replyMsg && replyMsg.length > 0) {
-            originalMessage = replyMsg[0]
-            logger.info(`[ChatGPT Debug] 通过source获取到回复消息`)
-          }
-        }
-
-        if (!originalMessage && replySegment && replySegment.id) {// 方式2：通过reply segment获取历史消息
-          try {
-            let replyMsg = null
-            if (e.isGroup) {
-              replyMsg = await e.group.getChatHistory(replySegment.id, 1)
-            } else {
-              replyMsg = await e.friend.getChatHistory(replySegment.id, 1)
-            }
-            
-            if (replyMsg && replyMsg.length > 0) {
-              originalMessage = replyMsg[0]
-              logger.info(`[ChatGPT Debug] 通过reply segment获取到回复消息`)
-            }
-          } catch (replySegErr) {
-            logger.warn(`[ChatGPT Debug] 通过reply segment获取消息失败: ${replySegErr}`)
-          }
-        }
-        
-        if (!originalMessage && replySegment) {// 方式3：如果有reply segment但获取不到历史消息，尝试使用segment中的信息
-          if (replySegment.text || replySegment.content) {
-            originalMessage = {
-              raw_message: replySegment.text || replySegment.content
-            }
-            logger.info(`[ChatGPT Debug] 使用reply segment中的文本信息`)
-          }
-        }
-        
-        // logger.info(`[ChatGPT Debug] 获取到的回复消息: ${originalMessage ? 'yes' : 'no'}`)
-        
-        // ==================== 提取被回复消息的文本内容 ====================
-        if (originalMessage) {
-          let replyText = ''
-          
-          logger.info(`[ChatGPT Debug] 原始消息结构: ${JSON.stringify(originalMessage)}`)
-          
-          // 提取被回复消息的文本内容
-          if (originalMessage.message && Array.isArray(originalMessage.message)) {
-            for (let segment of originalMessage.message) {
-              if (segment.type === 'text') {
-                replyText += segment.text
-              } else if (segment.type === 'image') {
-                replyText += '[图片]'
-              } else if (segment.type === 'face') {
-                replyText += '[表情]'
-              } else if (segment.type === 'at') {
-                replyText += `@${segment.text || segment.qq}`
-              } else if (segment.type === 'record') {
-                replyText += '[语音]'
-              } else if (segment.type === 'video') {
-                replyText += '[视频]'
-              }
-            }
-          } else if (typeof originalMessage.raw_message === 'string') {
-            replyText = originalMessage.raw_message
-          } else if (typeof originalMessage.message === 'string') {
-            replyText = originalMessage.message
-          }
-          
-          logger.info(`[ChatGPT Debug] 提取的回复文本: '${replyText}'`)
-          
-          // 如果成功提取到回复文本，构造上下文
-          if (replyText.trim()) {
-            replyContent = `【对话人引用的的消息】${replyText.trim()}\n【用户回复】`
-            logger.info(`[ChatGPT] 检测到回复消息，被回复内容: ${replyText.trim()}`)
-          } else {
-            logger.warn(`[ChatGPT Debug] 回复文本为空`)
-          }
-        } else {
-          logger.warn(`[ChatGPT Debug] 未获取到回复消息`)
-        }
-      } catch (err) {
-        logger.warn('[ChatGPT] 获取回复消息失败:', err)
-      }
-    }
-    
     // ==================== 消息预处理 ====================
     // 检查消息是否包含触发关键词（先确保msg存在且为字符串）
     const matchedKeywords = (msg && typeof msg === 'string') ? TRIGGER_KEYWORDS.filter(keyword => 
@@ -663,6 +555,12 @@ export class chatgpt extends plugin {///////////////////////////////////////////
     // 添加详细的匹配日志
     if (containsTriggerKeyword) {
       logger.info(`[ChatGPT] 关键词匹配检测: 用户 ${e.sender.user_id} 消息 "${msg}" 匹配到关键词: [${matchedKeywords.join(', ')}]`)
+    }
+    
+    // ==================== 处理回复消息的多种方式 ====================
+    // 修改检测条件，支持多种回复消息格式
+    if ((e.source || replySegment) && (e.atme || e.atBot || e.isPrivate || containsTriggerKeyword)) {
+      replyContent = await this.quoteReply(e, replySegment)
     }
     
     if (this.toggleMode === 'at') {// 艾特模式：只响应艾特机器人的消息或包含关键词的消息
@@ -719,13 +617,21 @@ export class chatgpt extends plugin {///////////////////////////////////////////
       } catch (err) {
         logger.warn(err)
       }
-    } else {// 命令模式：通过#chat触发
+    } else {// 命令模式：通过#chat触发或触发关键词
       
       let ats = e.message.filter(m => m.type === 'at')  // 获取艾特列表
       
-      if (!(e.atme || e.atBot) && ats.length > 0) {
+      // 检查是否为#chat命令
+      const isChatCommand = e.msg.trimStart().startsWith('#chat') || e.msg.trimStart().startsWith('#图片chat')
+      
+      // 如果不是#chat命令也不包含触发关键词，则不处理
+      if (!isChatCommand && !containsTriggerKeyword) {
+        return false
+      }
+      
+      if (!(e.atme || e.atBot || containsTriggerKeyword) && ats.length > 0) {
         if (Config.debug) {
-          logger.mark('艾特别人了，没艾特我，忽略#chat')
+          logger.mark('艾特别人了，没艾特我也没有触发关键词，忽略')
         }
         return false
       }
@@ -736,7 +642,14 @@ export class chatgpt extends plugin {///////////////////////////////////////////
       }
       
       // 提取命令后的内容
-      prompt = _.replace(e.msg.trimStart(), /#(图片)?chat/, '').trim()
+      if (isChatCommand) {
+        prompt = _.replace(e.msg.trimStart(), /#(图片)?chat/, '').trim()
+      } else if (containsTriggerKeyword) {
+        // 如果是通过关键词触发，使用完整消息内容
+        prompt = msg.trim()
+        logger.info(`[ChatGPT] 命令模式通过关键词触发: 用户 ${e.sender.user_id} 发送消息包含触发词`)
+      }
+      
       if (prompt.length === 0) {
         return false  // 空内容不处理
       }
@@ -1382,18 +1295,9 @@ export class chatgpt extends plugin {///////////////////////////////////////////
               const userData = await getUserData(targetQQ);
               const useModel = (userData.mode === 'default' ? null : userData.mode) || await redis.get('CHATGPT:USE') || 'api';
 
-              // 调用AI生成定时提醒内容
-              const chatMessage = await Core.sendMessage.call(chatgptInstance, systemPrompt, {}, useModel, dummyE);
-
-              if (chatMessage && chatMessage.text) {
-                // AI成功生成回复，发送定制化的提醒消息
-                await bot.pickFriend(targetQQ).sendMsg(chatMessage.text);
-                logger.info(`[定时消息][成功] 已向 ${targetQQ} 发送 AI 生成的定时消息：${chatMessage.text}`);
-              } else {
-                // AI未生成回复，发送原始提醒内容
-                await bot.pickFriend(targetQQ).sendMsg(`定时提醒触发：${content}`);
-                logger.warn(`[定时消息][警告] AI未生成回复，已向 ${targetQQ} 发送原始定时消息：${content}`);
-              }
+              // 直接调用 abstractChat 方法处理定时消息，复用所有现有逻辑
+              await chatgptInstance.abstractChat(dummyE, systemPrompt, useModel, false, null);
+              logger.info(`[定时消息][成功] 已向 ${targetQQ} 触发定时提醒处理：${content}`);
             } catch (error) {
               // 定时消息发送失败的错误处理
               logger.error(`[定时消息][错误] 发送定时消息失败到 ${targetQQ}：`, error);
@@ -1735,6 +1639,127 @@ export class chatgpt extends plugin {///////////////////////////////////////////
     const use = await redis.get('CHATGPT:USE')
       return await this.getConversations(e)
     // }
+  }
+
+  /**
+   * ==================== 处理引用回复消息 ====================
+   * 当用户回复某条消息并@机器人时，获取被回复的消息内容
+   * 支持多种获取方式：e.source、reply segment、segment文本信息
+   * 
+   * @param {object} e - 事件对象，包含消息上下文
+   * @param {object} replySegment - 回复消息段对象
+   * @returns {Promise<string>} 返回格式化的回复内容字符串
+   */
+  async quoteReply(e, replySegment) {
+    try {
+      logger.info(`[ChatGPT Debug] 开始处理回复消息`)
+      
+      let originalMessage = null
+      
+      // 方式1：通过e.source获取历史消息
+      if (e.source) {
+        let replyMsg = null
+        if (e.isGroup) {
+          replyMsg = await e.group.getChatHistory(e.source.seq, 1)
+        } else {
+          replyMsg = await e.friend.getChatHistory(e.source.seq, 1)
+        }
+        
+        if (replyMsg && replyMsg.length > 0) {
+          originalMessage = replyMsg[0]
+          logger.info(`[ChatGPT Debug] 通过source获取到回复消息`)
+        }
+      }
+
+      // 方式2：通过reply segment获取历史消息
+      if (!originalMessage && replySegment && replySegment.id) {
+        try {
+          let replyMsg = null
+          if (e.isGroup) {
+            replyMsg = await e.group.getChatHistory(replySegment.id, 1)
+          } else {
+            replyMsg = await e.friend.getChatHistory(replySegment.id, 1)
+          }
+          
+          if (replyMsg && replyMsg.length > 0) {
+            originalMessage = replyMsg[0]
+            logger.info(`[ChatGPT Debug] 通过reply segment获取到回复消息`)
+          }
+        } catch (replySegErr) {
+          logger.warn(`[ChatGPT Debug] 通过reply segment获取消息失败: ${replySegErr}`)
+        }
+      }
+      
+      // 方式3：如果有reply segment但获取不到历史消息，尝试使用segment中的信息
+      if (!originalMessage && replySegment) {
+        if (replySegment.text || replySegment.content) {
+          originalMessage = {
+            raw_message: replySegment.text || replySegment.content
+          }
+          logger.info(`[ChatGPT Debug] 使用reply segment中的文本信息`)
+        }
+      }
+      
+      // ==================== 提取被回复消息的文本内容 ====================
+      if (originalMessage) {
+        let replyText = ''
+        
+        logger.info(`[ChatGPT Debug] 原始消息结构: ${JSON.stringify(originalMessage)}`)
+        
+        // 提取被回复消息的文本内容
+        if (originalMessage.message && Array.isArray(originalMessage.message)) {
+          for (let segment of originalMessage.message) {
+            if (segment.type === 'text') {
+              replyText += segment.text
+            } else if (segment.type === 'image') {
+              replyText += '[图片]'
+            } else if (segment.type === 'face') {
+              replyText += '[表情]'
+            } else if (segment.type === 'at') {
+              replyText += `@${segment.text || segment.qq}`
+            } else if (segment.type === 'record') {
+              replyText += '[语音]'
+            } else if (segment.type === 'video') {
+              replyText += '[视频]'
+            }
+          }
+        } else if (typeof originalMessage.raw_message === 'string') {
+          replyText = originalMessage.raw_message
+        } else if (typeof originalMessage.message === 'string') {
+          replyText = originalMessage.message
+        }
+        
+        logger.info(`[ChatGPT Debug] 提取的回复文本: '${replyText}'`)
+        
+        // 如果成功提取到回复文本，构造上下文
+        if (replyText.trim()) {
+          // 获取被引用消息发送者的群名片或昵称
+          let senderName = '某用户'
+          if (originalMessage.sender) {
+            // 优先使用群名片，其次是昵称，最后是用户ID
+            senderName = originalMessage.sender.card || 
+                        originalMessage.sender.nickname || 
+                        originalMessage.sender.user_id || 
+                        '某用户'
+          } else if (originalMessage.user_id) {
+            // 如果没有sender对象，尝试直接获取user_id
+            senderName = originalMessage.user_id
+          }
+          
+          const replyContent = `【对话人引用的用户‘${senderName}’的消息内容】：${replyText.trim()}\n【对话人的主消息内容】：`
+          logger.info(`[ChatGPT] 检测到回复消息，被回复内容: ${replyText.trim()}，发送者: ${senderName}`)
+          return replyContent
+        } else {
+          logger.warn(`[ChatGPT Debug] 回复文本为空`)
+        }
+      } else {
+        logger.warn(`[ChatGPT Debug] 未获取到回复消息`)
+      }
+    } catch (err) {
+      logger.warn('[ChatGPT] 获取回复消息失败:', err)
+    }
+    
+    return '' // 如果没有获取到有效的回复内容，返回空字符串
   }
 
   /**
