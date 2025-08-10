@@ -553,6 +553,48 @@ class Core {
         const base64Image = Buffer.from(await response.arrayBuffer())
         option.image = base64Image.toString('base64')
       }
+
+      // 新增：处理语音文件URL
+      if (conversation.audioUrl) {
+        try {
+          logger.info(`[Gemini] 正在从URL获取语音文件: ${conversation.audioUrl}`);
+          const response = await fetch(conversation.audioUrl);
+          if (!response.ok) {
+            throw new Error(`获取语音文件失败: ${response.statusText}`);
+          }
+          const audioBuffer = await response.arrayBuffer();
+          const base64Audio = Buffer.from(audioBuffer).toString('base64');
+          // 将语音数据和MIME类型传递给Gemini客户端
+          option.audio = {
+            mimeType: response.headers.get('content-type') || 'audio/amr', // 默认为amr格式
+            data: base64Audio
+          };
+          logger.info(`[Gemini] 已成功处理语音文件，准备发送至API。`);
+        } catch (err) {
+          logger.error(`[Gemini] 处理语音URL时出错: ${err}`);
+          // 如果出错，仅记录日志，不中断流程
+        }
+      }
+
+      // 新增：处理引用图片URL
+      if (conversation.imageUrl) {
+        try {
+          logger.info(`[Gemini] 正在从URL获取引用图片: ${conversation.imageUrl}`);
+          const response = await fetch(conversation.imageUrl);
+          if (!response.ok) {
+            throw new Error(`获取引用图片失败: ${response.statusText}`);
+          }
+          const imageBuffer = await response.arrayBuffer();
+          const base64Image = Buffer.from(imageBuffer).toString('base64');
+          // 将引用图片数据传递给Gemini客户端
+          option.image = base64Image;
+          logger.info(`[Gemini] 已成功处理引用图片，准备发送至API。`);
+        } catch (err) {
+          logger.error(`[Gemini] 处理引用图片URL时出错: ${err}`);
+          // 如果出错，仅记录日志，不中断流程
+        }
+      }
+
       if (opt.enableSmart) {
         const {
           funcMap

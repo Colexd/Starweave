@@ -171,6 +171,15 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
         }
       })
     }
+    // 新增：处理语音消息
+    if (opt.audio && opt.audio.data) {
+      thisMessage.parts.push({
+        inline_data: {
+          mime_type: opt.audio.mimeType || 'audio/amr',
+          data: opt.audio.data
+        }
+      });
+    }
     history.push(_.cloneDeep(thisMessage))
     let url = `${this.baseUrl}/v1beta/models/${this.model}:generateContent`
     let body = {
