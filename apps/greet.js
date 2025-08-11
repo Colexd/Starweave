@@ -55,6 +55,11 @@ export class Greet extends plugin {
           reg: '^#关闭定时问候$', // 匹配关闭命令的正则表达式
           fnc: 'stopGreeting', // 对应执行的方法
           // permission: 'master' // 只有master权限的用户才能使用
+        },
+        {
+          reg: '.*', // 监听所有消息用于记录用户活动
+          fnc: 'monitorUserActivity',
+          log: false // 不记录日志避免刷屏
         }
       ]
     })
@@ -113,10 +118,15 @@ export class Greet extends plugin {
     this.runConfig = {} // 运行配置缓存
     this.loadRunConfig() // 加载运行配置文件
 
+    this.messageWaitFile = path.join(__dirname, 'message_wait.json') // 消息等待记录文件路径
+    this.messageWaitRecords = {} // 消息等待记录缓存
+    this.loadMessageWaitRecords() // 加载消息等待记录
+
     // 添加心跳日志，每45秒输出一次证明程序正在运行
     this.heartbeatInterval = setInterval(() => {
       const enabledUsersCount = Object.values(this.userConfigs).filter(status => status === 'on').length;
-      console.log(`[定时问候-心跳] ${new Date().toLocaleString('zh-CN')} | 运行状态: 正常 | 开启用户数: ${enabledUsersCount} | 扫描定时器: ${this.scanInterval ? '运行中' : '未启动'} | 每小时定时器: ${this.hourlyInterval ? '运行中' : '未启动'}`);
+      const waitingRecordsCount = Object.keys(this.messageWaitRecords).length;
+      console.log(`[定时问候-心跳] ${new Date().toLocaleString('zh-CN')} | 运行状态: 正常 | 开启用户数: ${enabledUsersCount} | 等待记录数: ${waitingRecordsCount} | 扫描定时器: ${this.scanInterval ? '运行中' : '未启动'} | 每小时定时器: ${this.hourlyInterval ? '运行中' : '未启动'}`);
     }, 45000) // 每45秒执行一次
 
     // 绑定方法，确保 'this' 上下文正确
@@ -134,6 +144,11 @@ export class Greet extends plugin {
     this.generateNextHourGreetingTime = this.generateNextHourGreetingTime.bind(this); // 新的生成下个小时时间方法
     this.updateHourlyGreetingTime = this.updateHourlyGreetingTime.bind(this); // 新的每小时更新方法
     this.formatToUTCPlus8 = this.formatToUTCPlus8.bind(this);
+    this.loadMessageWaitRecords = this.loadMessageWaitRecords.bind(this);
+    this.saveMessageWaitRecords = this.saveMessageWaitRecords.bind(this);
+    this.recordUserMessage = this.recordUserMessage.bind(this);
+    this.checkAndSendWaitingMessages = this.checkAndSendWaitingMessages.bind(this);
+    this.monitorUserActivity = this.monitorUserActivity.bind(this);
 
     // 机器人启动时自动启动定时器系统
     this.initializeTimerSystem();
@@ -154,8 +169,9 @@ export class Greet extends plugin {
     // 启动每50秒的扫描定时器
     this.scanInterval = setInterval(async () => {
       await this.scanAndExecuteGreeting();
+      await this.checkAndSendWaitingMessages(); // 检查消息等待状态
     }, 50000); // 每50秒执行一次
-    console.log('[定时问候] 50秒扫描定时器已启动。');
+    console.log('[定时问候] 50秒扫描定时器已启动（包含消息等待检查）。');
 
     // 计算到下一个整点的时间
     const now = new Date();
@@ -352,18 +368,178 @@ export class Greet extends plugin {
   }
 
   /**
+   * 加载消息等待记录文件 (message_wait.json)
+   */
+  loadMessageWaitRecords() {
+    try {
+      if (fs.existsSync(this.messageWaitFile)) {
+        const data = fs.readFileSync(this.messageWaitFile, 'utf8')
+        
+        // 检查文件内容是否有效
+        if (!data || data.trim() === '') {
+          console.warn('[定时问候] 消息等待记录文件为空，将重新创建默认配置。')
+          this.messageWaitRecords = {}
+          this.saveMessageWaitRecords()
+          return
+        }
+        
+        // 尝试解析JSON
+        try {
+          this.messageWaitRecords = JSON.parse(data)
+          console.log('[定时问候] 消息等待记录文件加载成功，记录数量：', Object.keys(this.messageWaitRecords).length)
+        } catch (parseError) {
+          console.error('[定时问候] 消息等待记录JSON解析失败，文件内容：', data)
+          console.error('[定时问候] 消息等待记录JSON解析错误详情：', parseError.message)
+          
+          // 备份损坏的文件
+          const backupFile = this.messageWaitFile + '.backup.' + Date.now()
+          fs.writeFileSync(backupFile, data, 'utf8')
+          console.log(`[定时问候] 已备份损坏的消息等待记录文件至：${backupFile}`)
+          
+          // 重新创建默认配置
+          this.messageWaitRecords = {}
+          this.saveMessageWaitRecords()
+          console.log('[定时问候] 已重新创建默认消息等待记录。')
+        }
+      } else {
+        // 如果文件不存在，创建默认配置
+        this.messageWaitRecords = {}
+        this.saveMessageWaitRecords()
+        console.log('[定时问候] 消息等待记录文件不存在，已创建新的默认配置。')
+      }
+    } catch (error) {
+      console.error('[定时问候] 加载消息等待记录文件时出错：', error)
+      console.error('[定时问候] 错误堆栈：', error.stack)
+      this.messageWaitRecords = {}
+      
+      // 尝试创建默认配置
+      try {
+        this.saveMessageWaitRecords()
+      } catch (saveError) {
+        console.error('[定时问候] 保存默认消息等待记录也失败：', saveError)
+      }
+    }
+  }
+
+  /**
+   * 保存消息等待记录文件 (message_wait.json)
+   */
+  saveMessageWaitRecords() {
+    try {
+      // 确保消息等待记录对象的格式正确
+      const cleanRecords = {}
+      for (const [userId, timestamp] of Object.entries(this.messageWaitRecords)) {
+        if (userId && typeof userId === 'string' && timestamp) {
+          cleanRecords[userId] = timestamp
+        }
+      }
+      
+      const jsonString = JSON.stringify(cleanRecords, null, 2)
+      fs.writeFileSync(this.messageWaitFile, jsonString, 'utf8')
+      console.log('[定时问候] 消息等待记录文件保存成功，记录数量：', Object.keys(cleanRecords).length)
+      
+      // 更新内存中的记录
+      this.messageWaitRecords = cleanRecords
+    } catch (error) {
+      console.error('[定时问候] 保存消息等待记录文件时出错：', error)
+      console.error('[定时问候] 尝试保存的记录：', this.messageWaitRecords)
+    }
+  }
+
+  /**
+   * 记录用户发送消息的时间
+   * @param {string} userId 用户ID
+   */
+  recordUserMessage(userId) {
+    const currentTime = this.formatToUTCPlus8(new Date())
+    this.messageWaitRecords[userId] = currentTime
+    this.saveMessageWaitRecords()
+    console.log(`[定时问候] 记录用户 ${userId} 消息时间: ${currentTime}`)
+  }
+
+  /**
+   * 检查并发送等待消息
+   */
+  async checkAndSendWaitingMessages() {
+    const now = new Date()
+    const enabledUsers = Object.keys(this.userConfigs).filter(userId => this.userConfigs[userId] === 'on')
+    
+    if (enabledUsers.length === 0) {
+      return // 没有开启用户，直接返回
+    }
+    
+    const waitingUsersCount = Object.keys(this.messageWaitRecords).length
+    console.log(`[定时问候] 开始检查消息等待状态，共 ${enabledUsers.length} 个开启用户，等待中用户数: ${waitingUsersCount}`)
+    
+    let processedCount = 0
+    let sentCount = 0
+    let cancelledCount = 0
+    
+    for (const userId of enabledUsers) {
+      if (this.messageWaitRecords[userId]) {
+        processedCount++
+        const lastMessageTime = new Date(this.messageWaitRecords[userId])
+        const timeDifference = now.getTime() - lastMessageTime.getTime()
+        const minutesDifference = Math.floor(timeDifference / (1000 * 60))
+        
+        // 生成5-30分钟的随机等待时间
+        const randomWaitMinutes = Math.floor(Math.random() * 26) + 5 // 5到30分钟的随机等待时间
+        
+        console.log(`[定时问候] 用户 ${userId} 最后消息时间: ${this.messageWaitRecords[userId]}, 已过 ${minutesDifference} 分钟, 等待阈值: ${randomWaitMinutes} 分钟`)
+        
+        if (minutesDifference >= randomWaitMinutes) {
+          console.log(`[定时问候] 用户 ${userId} 已经 ${minutesDifference} 分钟没有回复消息，准备发送询问消息`)
+          
+          // 生成询问消息
+          const currentTimeStr = now.toLocaleString('zh-CN')
+          const waitingPrompt = `【system】：现在时间是${currentTimeStr}，对话人已经${minutesDifference}分钟没有回复消息，在这样的情境下请根据上下文内容，模拟问候他在做什么，或者继续说你要说的话。`
+          
+          // 发送询问消息
+          await this.sendActualGreeting(userId, waitingPrompt)
+          sentCount++
+          console.log(`[定时问候] 已向用户 ${userId} 发送等待询问消息`)
+          
+          // 记录日志
+          this.addLogEntry({
+            type: 'waitingMessage',
+            action: 'waitingInquirySent',
+            userId: userId,
+            waitMinutes: minutesDifference,
+            randomThreshold: randomWaitMinutes,
+            messageContent: waitingPrompt.substring(0, 200) + '...',
+            sentAt: this.formatToUTCPlus8(now)
+          })
+          
+          // 清除该用户的等待记录，避免重复发送
+          delete this.messageWaitRecords[userId]
+          this.saveMessageWaitRecords()
+        }
+      }
+    }
+    
+    if (processedCount > 0) {
+      console.log(`[定时问候] 等待检查完成: 处理 ${processedCount} 个等待用户, 发送询问 ${sentCount} 个, 取消 ${cancelledCount} 个`)
+    }
+  }
+
+  /**
    * 添加日志条目
    * @param {object} data 要记录的数据
    */
   addLogEntry(data) {
-    // 只记录 type 为 'probabilityCheck' 或 'greeting' 的日志
-    if (data.type === 'probabilityCheck' || data.type === 'greeting') {
+    // 记录 type 为 'probabilityCheck'、'greeting' 或 'waitingMessage' 的日志
+    if (data.type === 'probabilityCheck' || data.type === 'greeting' || data.type === 'waitingMessage') {
       try {
         const logEntry = {
           timestamp: this.formatToUTCPlus8(new Date()), // 保存为UTC+8时间
           ...data
         }
         fs.appendFileSync(this.logFile, JSON.stringify(logEntry) + '\n', 'utf8')
+        
+        // 为取消事件添加特殊日志输出
+        if (data.action === 'waitingInquiryCancelled') {
+          console.log(`[定时问候] 已取消用户 ${data.userId} 的询问问候 - 用户在等待期间回复了消息`)
+        }
       } catch (error) {
         console.error('[定时问候] 添加日志条目时出错：', error)
       }
@@ -681,6 +857,42 @@ export class Greet extends plugin {
   }
 
   /**
+   * 监听用户活动，记录消息时间
+   * @param {object} e 消息事件对象
+   */
+  async monitorUserActivity(e) {
+    // 只监听私聊消息，且用户已开启定时问候功能
+    if (e.isPrivate && this.isUserEnabled(e.sender.user_id.toString())) {
+      // 如果不是定时问候相关的命令，则记录用户活动
+      if (!e.msg.startsWith('#开启定时问候') && !e.msg.startsWith('#关闭定时问候')) {
+        const userId = e.sender.user_id.toString()
+        
+        // 检查用户是否在等待状态中
+        if (this.messageWaitRecords[userId]) {
+          console.log(`[定时问候] 用户 ${userId} 在等待期间回复了消息，取消预定的询问问候`)
+          
+          // 记录取消事件到日志
+          this.addLogEntry({
+            type: 'waitingMessage',
+            action: 'waitingInquiryCancelled',
+            userId: userId,
+            reason: 'userRepliedDuringWait',
+            cancelledAt: this.formatToUTCPlus8(new Date())
+          })
+          
+          // 清除等待记录，取消询问问候
+          delete this.messageWaitRecords[userId]
+          this.saveMessageWaitRecords()
+        }
+        
+        // 记录新的用户消息时间（重新开始计时）
+        this.recordUserMessage(userId)
+      }
+    }
+    return false // 返回false，不阻止其他插件处理该消息
+  }
+
+  /**
    * 处理 #开启定时问候 命令
    * @param {object} e 消息事件对象
    */
@@ -842,6 +1054,9 @@ export class Greet extends plugin {
     try {
       await chat.abstractChat(dummyEvent, message, 'gemini')
       console.log(`[定时问候] abstractChat 调用完成为 ${targetQQ}。`)
+      
+      // AI回复后，更新用户的消息时间（表示对话仍在进行）
+      this.recordUserMessage(targetQQ)
     } catch (error) {
       console.error(`[定时问候] 调用 abstractChat 为 ${targetQQ} 时出错:`, error)
     }
