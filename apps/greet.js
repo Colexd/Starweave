@@ -680,20 +680,20 @@ export class Greet extends plugin {
     let probability = 0;
 
     // 根据时间段确定概率
-    if (currentHour >= 9 && currentHour < 20) {
-      probability = 0.35;
-      shouldSend = Math.random() < probability;
-      console.log(`[定时问候] 当前小时 ${currentHour} 处于 9-20点时间段，概率 ${probability * 100}%。`);
-    }
-    else if ((currentHour >= 6 && currentHour < 8) || (currentHour >= 20 && currentHour < 24)) {
+    if (currentHour == 7 || currentHour == 22) {
       probability = 0.85;
       shouldSend = Math.random() < probability;
-      console.log(`[定时问候] 当前小时 ${currentHour} 处于 6-8点或20-24点时间段，概率 ${probability * 100}%。`);
+      console.log(`[定时问候] 当前小时 ${currentHour} 处于 7点或22点时间段，概率 ${probability * 100}%。`);
     }
-    else if (currentHour >= 0 && currentHour < 6) { 
-      probability = 0.15;
+    else if (currentHour >= 8 && currentHour < 22) {
+      probability = 0.20;
       shouldSend = Math.random() < probability;
-      console.log(`[定时问候] 当前小时 ${currentHour} 处于 0-6点时间段，概率 ${probability * 100}%。`);
+      console.log(`[定时问候] 当前小时 ${currentHour} 处于 8-22点时间段，概率 ${probability * 100}%。`);
+    }
+    else if ((currentHour >= 23 && currentHour <= 23) || (currentHour >= 0 && currentHour < 7)) { 
+      probability = 0.05;
+      shouldSend = Math.random() < probability;
+      console.log(`[定时问候] 当前小时 ${currentHour} 处于 23-次日7点时间段，概率 ${probability * 100}%。`);
     } else {
       console.log(`[定时问候] 当前小时 ${currentHour} 不在任何预设问候时间段内，不发送问候。`);
       shouldSend = false;
