@@ -41,6 +41,7 @@ const chatMessageBuffers = new Map();//消息缓冲区 - 存储每个用户/群�
 const interruptionFlags = new Map();//中断标志映射 - 用于标记对话是否被中断
 const pendingRequests = new Map();//挂起请求映射 - 用于跟踪正在处理的请求
 const userContinuationStates = new Map();//用户续接对话状态 - 跟踪最近与AI交互的用户，允许续接对话
+const processingPrompts = new Map(); // 新增：存储正在调用API的prompt
 // ==================== 全局配置变量 ====================
 let version = Config.version // 插件版本号
 let proxy = getProxy()       // 代理配置
@@ -747,16 +748,43 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
     // 设置中断标志
     interruptionFlags.set(conversationKey, true);
 
-    // 初始化消息缓冲区（如果不存在）
-    if (!chatMessageBuffers.has(conversationKey)) {
-        chatMessageBuffers.set(conversationKey, { 
-          messages: [],           // 消息数组
-          timer: null,           // 定时器
-          e: null,               // 事件对象
-          use: use,              // AI模型
-          forcePictureMode: forcePictureMode  // 强制图片模式
-        });
-        // logger.info(`[ChatGPT] 为 ${conversationKey} 创建新的消息缓冲。`);
+    // 新增：检查是否有正在处理的API调用，并合并消息
+    if (processingPrompts.has(conversationKey)) {
+      const oldPrompt = processingPrompts.get(conversationKey);
+      // 从新旧prompt中提取纯粹的用户消息部分
+      const oldUserMessage = oldPrompt.match(/用户消息：(.*)$/)?.[1] || '';
+      const newUserMessage = prompt.match(/用户消息：(.*)$/)?.[1] || '';
+      
+      // 找到旧消息的前缀
+      const prefixMatch = oldPrompt.match(/^(当前日期时间：.*?用户消息：)/);
+      if (prefixMatch) {
+        const prefix = prefixMatch[1];
+        // 将新消息追加到旧消息后面，形成新的完整prompt
+        prompt = prefix + oldUserMessage + ' ' + newUserMessage;
+        logger.info(`[ChatGPT] API调用被打断，新旧消息已合并。合并后: '${prompt}'`);
+      }
+      // 将合并后的消息作为当前缓冲区的第一条消息
+      if (chatMessageBuffers.has(conversationKey)) {
+        chatMessageBuffers.get(conversationKey).messages = [prompt];
+      } else {
+        // 如果万一没有缓冲区，就创建一个
+        chatMessageBuffers.set(conversationKey, { messages: [prompt], timer: null, e: null, use: use, forcePictureMode: forcePictureMode });
+      }
+      processingPrompts.delete(conversationKey); // 清除旧的标记
+    } else {
+      // 原始逻辑：将新消息添加到缓冲区
+      // 初始化消息缓冲区（如果不存在）
+      if (!chatMessageBuffers.has(conversationKey)) {
+          chatMessageBuffers.set(conversationKey, { 
+            messages: [],           // 消息数组
+            timer: null,           // 定时器
+            e: null,               // 事件对象
+            use: use,              // AI模型
+            forcePictureMode: forcePictureMode  // 强制图片模式
+          });
+          // logger.info(`[ChatGPT] 为 ${conversationKey} 创建新的消息缓冲。`);
+      }
+      chatMessageBuffers.get(conversationKey).messages.push(prompt);
     }
 
     const buffer = chatMessageBuffers.get(conversationKey);
@@ -766,9 +794,7 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
     buffer.use = use;
     buffer.forcePictureMode = forcePictureMode;
     
-    // 将新消息添加到缓冲区
-    buffer.messages.push(prompt);
-    logger.info(`[ChatGPT Debug] 消息已缓冲， 当前缓冲消息数: ${buffer.messages.length}, 消息内容: '${prompt}'`);
+    logger.info(`[ChatGPT Debug] 消息已缓冲， 当前缓冲消息数: ${buffer.messages.length}, 消息内容: '${buffer.messages[buffer.messages.length - 1]}'`);
 
     // 设置用户续接对话状态，允许后续消息无需关键词或@触发
     setUserContinuationState(conversationKey, e.sender.user_id);
@@ -967,6 +993,9 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
     }
 
     try {
+      // 新增：标记prompt正在处理
+      processingPrompts.set(conversationKey, prompt);
+
       if (Config.debug) {
         // 调试模式下可以记录对话状态（当前已注释）
         // logger.mark({ conversation })
@@ -975,6 +1004,15 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
       // ==================== 调用AI核心处理模块 ====================
       // 这是整个插件的核心：将用户输入发送给AI并获取回复
       let chatMessage = await Core.sendMessage.bind(this)(prompt, conversation, use, e)
+
+      // 新增：检查API调用返回后，是否已经被新消息打断并合并
+      if (!processingPrompts.has(conversationKey)) {
+        logger.info(`[ChatGPT] API调用返回，但prompt已被新消息合并处理，本次结果作废。`);
+        return; // 直接返回，不处理本次结果
+      } else {
+        // 如果没有被打断，正常清理标记
+        processingPrompts.delete(conversationKey);
+      }
 
       // ==================== 处理AI回复为空的情况 ====================
       if (chatMessage?.noMsg) {
@@ -1409,6 +1447,11 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
     // ==================== 异常处理机制 ====================
     } catch (err) {
       logger.error(err)  // 记录详细错误信息
+      
+      // 新增：在catch块中也要清理标记
+      if (processingPrompts.has(conversationKey)) {
+        processingPrompts.delete(conversationKey);
+      }
       
       // // ==================== API3队列清理 ====================
       // // 如果是API3模式出现异常，需要清理队列腾出位置
