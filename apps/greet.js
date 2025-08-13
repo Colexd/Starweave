@@ -146,7 +146,7 @@ export class Greet extends plugin {
     this.formatToUTCPlus8 = this.formatToUTCPlus8.bind(this);
     this.loadMessageWaitRecords = this.loadMessageWaitRecords.bind(this);
     this.saveMessageWaitRecords = this.saveMessageWaitRecords.bind(this);
-    this.recordUserMessage = this.recordUserMessage.bind(this);
+    this.startWaitTimerForUser = this.startWaitTimerForUser.bind(this);
     this.checkAndSendWaitingMessages = this.checkAndSendWaitingMessages.bind(this);
     this.monitorUserActivity = this.monitorUserActivity.bind(this);
 
@@ -447,14 +447,14 @@ export class Greet extends plugin {
   }
 
   /**
-   * 记录用户发送消息的时间
+   * 记录机器人回复的时间，并启动等待计时器
    * @param {string} userId 用户ID
    */
-  recordUserMessage(userId) {
+  startWaitTimerForUser(userId) {
     const currentTime = this.formatToUTCPlus8(new Date())
     this.messageWaitRecords[userId] = currentTime
     this.saveMessageWaitRecords()
-    console.log(`[定时问候] 记录用户 ${userId} 消息时间: ${currentTime}`)
+    console.log(`[定时问候] 记录机器人回复时间 ${userId}: ${currentTime}，开始等待用户回复。`)
   }
 
   /**
@@ -485,32 +485,40 @@ export class Greet extends plugin {
         // 生成5-30分钟的随机等待时间
         const randomWaitMinutes = Math.floor(Math.random() * 26) + 5 // 5到30分钟的随机等待时间
         
-        console.log(`[定时问候] 用户 ${userId} 最后消息时间: ${this.messageWaitRecords[userId]}, 已过 ${minutesDifference} 分钟, 等待阈值: ${randomWaitMinutes} 分钟`)
+        console.log(`[定时问候] 用户 ${userId} 机器人最后回复时间: ${this.messageWaitRecords[userId]}, 已过 ${minutesDifference} 分钟, 等待阈值: ${randomWaitMinutes} 分钟`)
         
-        if (minutesDifference >= randomWaitMinutes) {
-          console.log(`[定时问候] 用户 ${userId} 已经 ${minutesDifference} 分钟没有回复消息，准备发送询问消息`)
-          
-          // 生成询问消息
-          const currentTimeStr = now.toLocaleString('zh-CN')
-          const waitingPrompt = `【system】：现在时间是${currentTimeStr}，对话人已经${minutesDifference}分钟没有回复消息，在这样的情境下请根据上下文内容，模拟问候他在做什么，或者继续说你要说的话。`
-          
-          // 发送询问消息
-          await this.sendActualGreeting(userId, waitingPrompt)
-          sentCount++
-          console.log(`[定时问候] 已向用户 ${userId} 发送等待询问消息`)
-          
-          // 记录日志
-          this.addLogEntry({
-            type: 'waitingMessage',
-            action: 'waitingInquirySent',
-            userId: userId,
-            waitMinutes: minutesDifference,
-            randomThreshold: randomWaitMinutes,
-            messageContent: waitingPrompt.substring(0, 200) + '...',
-            sentAt: this.formatToUTCPlus8(now)
-          })
-          
-          // 清除该用户的等待记录，避免重复发送
+        // 增加20%的概率检测
+        if (Math.random() < 0.3) {
+          if (minutesDifference >= randomWaitMinutes) {
+            console.log(`[定时问候] 用户 ${userId} 已经 ${minutesDifference} 分钟没有回复消息，准备发送询问消息`)
+            
+            // 生成询问消息
+            const currentTimeStr = now.toLocaleString('zh-CN')
+            const waitingPrompt = `【system】：现在时间是${currentTimeStr}，对话人已经${minutesDifference}分钟没有回复消息，在这样的情境下请根据上下文内容，模拟问候他在做什么，或者继续说你要说的话。`
+            
+            // 发送询问消息，且不记录本次发送的时间
+            await this.sendActualGreeting(userId, waitingPrompt, false)
+            sentCount++
+            console.log(`[定时问候] 已向用户 ${userId} 发送等待询问消息`)
+            
+            // 记录日志
+            this.addLogEntry({
+              type: 'waitingMessage',
+              action: 'waitingInquirySent',
+              userId: userId,
+              waitMinutes: minutesDifference,
+              randomThreshold: randomWaitMinutes,
+              messageContent: waitingPrompt.substring(0, 200) + '...',
+              sentAt: this.formatToUTCPlus8(now)
+            })
+            
+            // 清除该用户的等待记录，避免重复发送
+            delete this.messageWaitRecords[userId]
+            this.saveMessageWaitRecords()
+          }
+        } else {
+          console.log(`[定时问候] 用户 ${userId} 未通过20%的等待问候概率检测，本次跳过。`)
+          // 即使未通过概率检测，也清除等待记录，避免循环
           delete this.messageWaitRecords[userId]
           this.saveMessageWaitRecords()
         }
@@ -885,8 +893,8 @@ export class Greet extends plugin {
           this.saveMessageWaitRecords()
         }
         
-        // 记录新的用户消息时间（重新开始计时）
-        this.recordUserMessage(userId)
+        // 用户回复后，重新启动等待计时器
+        this.startWaitTimerForUser(userId)
       }
     }
     return false // 返回false，不阻止其他插件处理该消息
@@ -994,8 +1002,9 @@ export class Greet extends plugin {
    * 实际发送消息的辅助函数
    * @param {string} targetQQ 目标QQ号
    * @param {string} message 消息内容
+   * @param {boolean} recordTime 是否记录本次发送的时间
    */
-  async sendActualGreeting(targetQQ, message) {
+  async sendActualGreeting(targetQQ, message, recordTime = true) {
     console.log(`[定时问候] 准备为QQ: ${targetQQ} 发送实际问候消息。`)
 
     if (!this.bot) {
@@ -1055,8 +1064,12 @@ export class Greet extends plugin {
       await chat.abstractChat(dummyEvent, message, 'gemini')
       console.log(`[定时问候] abstractChat 调用完成为 ${targetQQ}。`)
       
-      // AI回复后，更新用户的消息时间（表示对话仍在进行）
-      this.recordUserMessage(targetQQ)
+      // AI回复后，根据参数决定是否更新用户的消息时间
+      if (recordTime) {
+        this.startWaitTimerForUser(targetQQ)
+      } else {
+        console.log(`[定时问候] 本次为等待问候，不记录机器人回复时间以避免循环。`)
+      }
     } catch (error) {
       console.error(`[定时问候] 调用 abstractChat 为 ${targetQQ} 时出错:`, error)
     }

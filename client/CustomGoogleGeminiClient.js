@@ -115,29 +115,59 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
    * @param {number} retryTime 重试次数
    * @returns {Promise<{conversationId: string?, parentMessageId: string, text: string, id: string}>}
    */
-  async sendMessage (text, opt = {}, retryTime = 3) {
+  async sendMessage (text, opt = {}) {
+    const maxRetries = Config.gemini?.retries ?? 3;
+    const requestTimeout = 120000; // 从配置读取超时，默认120秒
+    let lastError;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.attemptSendMessage(text, opt, requestTimeout);
+      } catch (error) {
+        lastError = error;
+        // 只对网络超时和5xx系列错误进行重试
+        if (error.name === 'AbortError' || (error.message && error.message.startsWith('API请求失败: 5'))) {
+          logger.warn(`[Gemini Client] 第 ${attempt} 次请求失败 (超时或服务器错误): ${error.message}`);
+          if (attempt < maxRetries) {
+            const delay = Math.pow(2, attempt - 1) * 1000; // 指数退避
+            logger.info(`[Gemini Client] 将在 ${delay / 1000} 秒后重试...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        } else {
+          // 对于其他错误（如4xx客户端错误），不重试，直接抛出
+          throw lastError;
+        }
+      }
+    }
+
+    logger.error(`[Gemini Client] 所有 ${maxRetries} 次重试均失败。`);
+    throw lastError;
+  }
+
+  async attemptSendMessage(text, opt = {}, timeout) {
     let history = await this.getHistory(opt.parentMessageId)
     let systemMessage = opt.system
-    // if (systemMessage) {
-    //   history = history.reverse()
-    //   history.push({
-    //     role: 'model',
-    //     parts: [
-    //       {
-    //         text: 'ok'
-    //       }
-    //     ]
-    //   })
-    //   history.push({
-    //     role: 'user',
-    //     parts: [
-    //       {
-    //         text: systemMessage
-    //       }
-    //     ]
-    //   })
-    //   history = history.reverse()
-    // }
+
+    // 增强的诊断日志
+    try {
+      const diagnosticInfo = {
+        model: this.model,
+        hasImage: !!opt.image,
+        hasAudio: !!(opt.audio && opt.audio.data),
+        historyLength: history.length,
+        promptLength: text?.length || 0,
+      };
+      if (opt.image) {
+        diagnosticInfo.imageSize = opt.image.length;
+      }
+      if (opt.audio && opt.audio.data) {
+        diagnosticInfo.audioSize = opt.audio.data.length;
+      }
+      logger.info(`[Gemini Client] 发送Gemini请求。详情: ${JSON.stringify(diagnosticInfo)}`);
+    } catch (logError) {
+      logger.warn(`[Gemini Client] 记录诊断日志时出错: ${logError.message}`);
+    }
+
     const idThis = crypto.randomUUID()
     const idModel = crypto.randomUUID()
     if (opt.functionResponse && !typeof Array.isArray(opt.functionResponse)) {
@@ -146,9 +176,6 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
     const thisMessage = opt.functionResponse?.length > 0
       ? {
           role: 'user',
-          // parts: [{
-          //   functionResponse: opt.functionResponse
-          // }],
           parts: opt.functionResponse.map(i => {
             return {
               functionResponse: i
@@ -171,7 +198,6 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
         }
       })
     }
-    // 新增：处理语音消息
     if (opt.audio && opt.audio.data) {
       thisMessage.parts.push({
         inline_data: {
@@ -183,10 +209,6 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
     history.push(_.cloneDeep(thisMessage))
     let url = `${this.baseUrl}/v1beta/models/${this.model}:generateContent`
     let body = {
-      // 不去兼容官方的简单格式了，直接用，免得function还要转换
-      /**
-       * @type Array<Content>
-       */
       contents: history,
       safetySettings: [
         {
@@ -228,19 +250,15 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
     if (this.tools?.length > 0) {
       body.tools.push({
         function_declarations: this.tools.map(tool => tool.function())
-        // codeExecution: {}
       })
-
-      // ANY要笑死人的效果
       let mode = opt.toolMode || 'AUTO'
-      let lastFuncName = (/** @type {FunctionResponse[] | undefined}**/ opt.functionResponse)?.map(rsp => rsp.name)
+      let lastFuncName = (opt.functionResponse)?.map(rsp => rsp.name)
       const mustSendNextTurn = [
         'searchImage', 'searchMusic', 'searchVideo'
       ]
       if (lastFuncName && lastFuncName?.find(name => mustSendNextTurn.includes(name))) {
         mode = 'ANY'
       }
-      // 防止死循环。
       delete opt.toolMode
       body.tool_config = {
         function_calling_config: {
@@ -267,8 +285,7 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
     }
 
     const controller = new AbortController()
-    const timeout = Config.geminiTimeout || 60000; // 从Config中获取超时时间，默认60秒
-    const id = setTimeout(() => controller.abort(), timeout);
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
 
     let result
     try {
@@ -278,21 +295,23 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
         headers: {
           'x-goog-api-key': this._key
         },
-        signal: controller.signal // 添加 signal
+        signal: controller.signal
       })
     } catch (error) {
       if (error.name === 'AbortError') {
-        throw new Error('API请求超时')
+        // 清理定时器后抛出特定错误
+        clearTimeout(timeoutId);
+        throw new Error('API请求超时');
       }
       throw error
     } finally {
-      clearTimeout(id)
+      clearTimeout(timeoutId)
     }
     
-    // 检查HTTP状态码
     if (result.status !== 200) {
       const errorText = await result.text()
       console.error(`[Gemini] API请求失败，状态码: ${result.status}, 错误信息: ${errorText}`)
+      // 抛出包含状态码的错误，以便重试逻辑可以捕获
       throw new Error(`API请求失败: ${result.status} - ${errorText}`)
     }
     
@@ -304,16 +323,12 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
       throw new Error(`JSON解析失败: ${parseError.message}`)
     }
     
-    /**
-     * @type {Content | undefined}
-     */
     let responseContent
     
     if (this.debug) {
       console.log(JSON.stringify(response))
     }
     
-    // 检查response和candidates是否存在
     if (!response || !response.candidates || !Array.isArray(response.candidates) || response.candidates.length === 0) {
       throw new Error(`API返回无效响应: ${JSON.stringify(response)}`)
     }
@@ -321,37 +336,31 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
     responseContent = response.candidates[0].content
     let groundingMetadata = response.candidates[0].groundingMetadata
     
-    // 检查responseContent是否存在
     if (!responseContent) {
+      // 如果响应中没有内容，也视为一种可重试的错误
+      if (response.candidates[0].finishReason === 'SAFETY') {
+         throw new Error(`API返回内容被安全策略拦截: ${JSON.stringify(response.candidates[0])}`);
+      }
       throw new Error(`API返回的content为空: ${JSON.stringify(response.candidates[0])}`)
     }
     
     if (response.candidates[0].finishReason === 'MALFORMED_FUNCTION_CALL') {
-      console.warn('遇到MALFORMED_FUNCTION_CALL，进行重试。')
-      if (retryTime > 0) {
-        return this.sendMessage(text, opt, retryTime - 1)
-      } else {
-        throw new Error('重试次数已用完，遇到MALFORMED_FUNCTION_CALL')
-      }
+      console.warn('遇到MALFORMED_FUNCTION_CALL，将由重试机制处理。')
+      throw new Error('MALFORMED_FUNCTION_CALL');
     }
-    // todo 空回复也可以重试
+
     if (responseContent.parts && responseContent.parts.filter(i => i.functionCall).length > 0) {
-      // functionCall
       const functionCall = responseContent.parts.filter(i => i.functionCall).map(i => i.functionCall)
       const text = responseContent.parts.find(i => i.text)?.text
       if (text && text.trim()) {
-        // send reply first
         console.info('send message: ' + text.trim())
         opt.replyPureTextCallback && await opt.replyPureTextCallback(text.trim())
       }
-      let /** @type {FunctionResponse[]} **/ fcResults = []
+      let fcResults = []
       for (let fc of functionCall) {
         console.info(JSON.stringify(fc))
         const funcName = fc.name
         let chosenTool = this.tools.find(t => t.name === funcName)
-        /**
-         * @type {FunctionResponse}
-         */
         let functionResponse = {
           name: funcName,
           response: {
@@ -360,12 +369,10 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
           }
         }
         if (!chosenTool) {
-          // 根本没有这个工具！
           functionResponse.response.content = {
             error: `Function ${funcName} doesn't exist`
           }
         } else {
-          // execute function
           try {
             let isAdmin = ['admin', 'owner'].includes(this.e.sender.role) || (this.e.group?.is_admin && this.e.isMaster)
             let isOwner = ['owner'].includes(this.e.sender.role) || (this.e.group?.is_owner && this.e.isMaster)
@@ -391,8 +398,6 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
       let responseOpt = _.cloneDeep(opt)
       responseOpt.parentMessageId = idModel
       responseOpt.functionResponse = fcResults
-      // 递归直到返回text
-      // 先把这轮的消息存下来
       await this.upsertMessage(thisMessage)
       responseContent = handleSearchResponse(responseContent).responseContent
       const respMessage = Object.assign(responseContent, {
@@ -400,6 +405,7 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
         parentMessageId: idThis
       })
       await this.upsertMessage(respMessage)
+      // The recursive call is now handled by the main sendMessage retry loop
       return await this.sendMessage('', responseOpt)
     }
     if (responseContent) {
@@ -411,7 +417,6 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
       await this.upsertMessage(respMessage)
     }
     
-    // 确保responseContent存在再调用handleSearchResponse
     if (!responseContent) {
       return {
         text: '',
@@ -426,7 +431,6 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
       if (groundingMetadata?.groundingChunks) {
         final += '\n参考资料\n'
         groundingMetadata.groundingChunks.forEach(chunk => {
-          // final += `[${chunk.web.title}](${chunk.web.uri})\n`
           final += `[${chunk.web.title}]\n`
         })
         if (groundingMetadata.webSearchQueries && Array.isArray(groundingMetadata.webSearchQueries)) {

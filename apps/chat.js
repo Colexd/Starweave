@@ -48,7 +48,7 @@ let proxy = getProxy()       // 代理配置
 // 当消息包含这些关键词时，会像被@一样触发AI回复
 // 您可以根据需要修改、添加或删除关键词
 const TRIGGER_KEYWORDS = [
-  '小绘',        // 基础触发词
+  '小绘小绘',        // 基础触发词
   '星小绘bot'
 ];
 
@@ -1533,7 +1533,7 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
    * 调用渲染服务器将对话内容转换为图片格式并发送给用户
    * 适用于长文本、代码块、表格等需要特殊格式展示的内容
    * 
-   * @param {object} e - 事件对象，包含用户和群组信息
+   * @param {object} e - 事件对象，包含
    * @param {string} use - 当前使用的AI模型标识  
    * @param {string} content - AI生成的回复内容
    * @param {string} prompt - 用户发送的原始提示内容
