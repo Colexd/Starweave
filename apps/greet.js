@@ -872,7 +872,8 @@ export class Greet extends plugin {
     // 只监听私聊消息，且用户已开启定时问候功能
     if (e.isPrivate && this.isUserEnabled(e.sender.user_id.toString())) {
       // 如果不是定时问候相关的命令，则记录用户活动
-      if (!e.msg.startsWith('#开启定时问候') && !e.msg.startsWith('#关闭定时问候')) {
+      // 增加对 e.msg 的类型检查，确保其为字符串再调用 startsWith
+      if (!(typeof e.msg === 'string' && (e.msg.startsWith('#开启定时问候') || e.msg.startsWith('#关闭定时问候')))) {
         const userId = e.sender.user_id.toString()
         
         // 检查用户是否在等待状态中

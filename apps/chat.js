@@ -30,6 +30,7 @@ import { collectProcessors } from '../utils/postprocessors/BasicProcessor.js' //
 import { segment } from 'oicq'; // OICQ 消息段构造器
 import path from 'path'; // Node.js 路径处理
 import { fileURLToPath } from 'url'; // URL 转文件路径工具
+import fs from 'fs'; // Node.js 文件系统模块
 import { customSplitRegex, filterResponseChunk } from '../utils/text.js'; // 文本分段和过滤工具
 import { convertFaces } from '../utils/face.js'; // 表情转换处理工具
 import moment from 'moment'; // 时间日期处理库
@@ -42,6 +43,62 @@ const interruptionFlags = new Map();//中断标志映射 - 用于标记对话是
 const pendingRequests = new Map();//挂起请求映射 - 用于跟踪正在处理的请求
 const userContinuationStates = new Map();//用户续接对话状态 - 跟踪最近与AI交互的用户，允许续接对话
 const processingPrompts = new Map(); // 新增：存储正在调用API的prompt
+const pendingConfirmations = new Map(); // 用于销毁对话前的确认
+
+// ==================== API调用日志管理 ====================
+function getApiLogFileName() {
+  const today = moment().format('YYYY-MM-DD');
+  return path.join(__dirname, 'api_log', `API_log_${today}.json`);
+}
+
+// 确保api_log目录存在
+const apiLogDir = path.join(__dirname, 'api_log');
+if (!fs.existsSync(apiLogDir)) {
+  fs.mkdirSync(apiLogDir);
+}
+
+/**
+ * 加载API调用日志
+ * @returns {object} API调用日志对象
+ */
+function loadApiLog() {
+  const file = getApiLogFileName();
+  try {
+    if (fs.existsSync(file)) {
+      const data = fs.readFileSync(file, 'utf8');
+      if (data.trim()) {
+        return JSON.parse(data);
+      }
+    }
+  } catch (error) {
+    logger.error(`[API日志] 加载API日志文件失败: ${error}`);
+  }
+  return {};
+}
+
+function saveApiLog(logData) {
+  const file = getApiLogFileName();
+  try {
+    fs.writeFileSync(file, JSON.stringify(logData, null, 2), 'utf8');
+  } catch (error) {
+    logger.error(`[API日志] 保存API日志文件失败: ${error}`);
+  }
+}
+
+function recordApiCall(userId) {
+  try {
+    const apiLog = loadApiLog();
+    const userIdStr = userId.toString();
+    if (!apiLog[userIdStr]) {
+      apiLog[userIdStr] = 0;
+    }
+    apiLog[userIdStr]++;
+    saveApiLog(apiLog);
+    logger.info(`[API日志] 用户 ${userIdStr} API调用次数: ${apiLog[userIdStr]}`);
+  } catch (error) {
+    logger.error(`[API日志] 记录API调用失败: ${error}`);
+  }
+}
 // ==================== 全局配置变量 ====================
 let version = Config.version // 插件版本号
 let proxy = getProxy()       // 代理配置
@@ -154,19 +211,28 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
    * @param {object} e - 事件对象
    */
   constructor (e) {/////////////////////////////////////////////////////////////////初始化插件配置和规则
-
+    // 规则数组插入#备份和#恢复
     let toggleMode = Config.toggleMode // 获取切换模式配置
     super({
       name: 'ChatGpt 对话',
       dsc: '与人工智能对话，畅聊无限可能~',
       event: 'message',
       priority: 1144,/** 优先级，数字越小等级越高 */
-      rule: [
-        // ==================== 时间查询规则 ====================
-        {
-          reg: '^#当前时间$',           // 正则：查询当前时间
-          fnc: 'getCurrentTime'         // 对应的处理函数
-        },
+  rule: [
+    // ==================== 聊天记录备份与恢复 ====================
+    {
+      reg: '^#备份$',
+      fnc: 'backupConversation'
+    },
+    {
+      reg: '^#恢复(\\d+)$',
+      fnc: 'restoreConversation'
+    },
+    // ==================== 时间查询规则 ====================
+    {
+      reg: '^#当前时间$',           // 正则：查询当前时间
+      fnc: 'getCurrentTime'         // 对应的处理函数
+    },
         // ==================== 默认聊天规则 ====================
         {
           // 根据切换模式决定是艾特触发还是 #chat 触发，如果是at模式则使用at触发，如果是chat模式则使用chat触发
@@ -191,6 +257,14 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
           fnc: 'endAllConversations',
           permission: 'master'           // 需要主人权限
         },
+        {
+          reg: '^#确认$', // 新增：处理确认操作的规则
+          fnc: 'confirmAction'
+        },
+        {
+          reg: '^#取消$', // 新增：处理取消操作的规则
+          fnc: 'cancelAction'
+        },
         // ==================== 回复模式切换规则 ====================
         // {
         //   reg: '#chatgpt帮助',           // 帮助命令（已注释）
@@ -211,8 +285,8 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
           permission: 'master'           // 需要主人权限
         },
         {
-          reg: '^#测试关键词',            // 测试关键词匹配功能
-          fnc: 'testKeywordMatching',
+          reg: '^#API统计(\\s+\\d{4}-\\d{2}-\\d{2})?$', // 支持带日期参数
+          fnc: 'getApiStats',
           permission: 'master'           // 需要主人权限
         }
       ]
@@ -220,42 +294,6 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
     
     // 保存切换模式配置到实例
     this.toggleMode = toggleMode
-    
-    // /**
-    //  * 自定义回复函数
-    //  * 支持 Markdown 渲染和按钮功能
-    //  * 
-    //  * @param {string|array} msg - 要发送的消息内容
-    //  * @param {boolean} quote - 是否引用原消息
-    //  * @param {object} data - 附加数据（如按钮信息）
-    //  */
-    // this.reply = async (msg, quote, data) => {
-    //   // 如果未启用 Markdown，直接使用原生回复
-    //   if (!Config.enableMd) {
-    //     return e.reply(msg, quote, data)
-    //   }
-      
-    //   // 获取运行时处理器
-    //   let handler = e.runtime?.handler || {}
-      
-    //   // 调用按钮后处理器，生成按钮元素
-    //   const btns = await handler.call('chatgpt.button.post', this.e, data)
-    //   if (btns) {
-    //     const btnElement = {
-    //       type: 'button',    // 按钮类型
-    //       content: btns      // 按钮内容
-    //     }
-        
-    //     // 将按钮添加到消息中
-    //     if (Array.isArray(msg)) {
-    //       msg.push(btnElement)  // 消息是数组，直接添加
-    //     } else {
-    //       msg = [msg, btnElement]  // 消息是字符串，转为数组后添加
-    //     }
-    //   }
-
-    //   return e.reply(msg, quote, data)
-    // }
   }
 
   /**
@@ -320,30 +358,50 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
    * @param {object} e - 事件对象
    * @returns {boolean} - 是否成功处理
    */
-  async testKeywordMatching (e) {
-    // 提取测试文本
-    let testText = e.msg.replace(/^#测试关键词\s*/, '').trim()
 
-    if (!testText) {
-      await this.reply('请输入要测试的文本，例如：#测试关键词 小绘你好', true)
-      return false
+
+  /**
+   * 获取API调用统计
+   * 处理 #API统计 命令，显示所有用户的API调用次数
+   * 
+   * @param {object} e - 事件对象
+   * @returns {boolean} - 是否成功处理
+   */
+  async getApiStats (e) {
+    try {
+      // 支持查询指定日期，格式 #API统计 2025-08-14
+      let date = e.msg.replace(/^#API统计\s*/, '').trim();
+      if (!date) date = moment().format('YYYY-MM-DD');
+      const file = path.join(__dirname, 'api_log', `API_log_${date}.json`);
+      let apiLog = {};
+      if (fs.existsSync(file)) {
+        const data = fs.readFileSync(file, 'utf8');
+        if (data.trim()) apiLog = JSON.parse(data);
+      }
+      if (Object.keys(apiLog).length === 0) {
+        await this.reply(`${date} 暂无API调用记录`, true);
+        return true;
+      }
+      const sortedUsers = Object.entries(apiLog)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 20);
+      let result = `${date} API调用统计 (前20名)\n`;
+      result += '━━━━━━━━━━━━━━━━━━━━\n';
+      let totalCalls = 0;
+      sortedUsers.forEach(([userId, count], index) => {
+        result += `${index + 1}. QQ: ${userId} - ${count}次\n`;
+        totalCalls += count;
+      });
+      result += '━━━━━━━━━━━━━━━━━━━━\n';
+      result += `总用户数: ${Object.keys(apiLog).length}\n`;
+      result += `总调用次数: ${totalCalls}`;
+      await this.reply(result, true);
+      return true;
+    } catch (error) {
+      logger.error('[API统计] 获取API统计失败:', error);
+      await this.reply('获取API统计失败，请检查日志', true);
+      return false;
     }
-
-    // 执行关键词匹配测试
-    const matchedKeywords = TRIGGER_KEYWORDS.filter(keyword => 
-      testText.toLowerCase().includes(keyword.toLowerCase())
-    );
-    const containsTriggerKeyword = matchedKeywords.length > 0;
-
-    // 返回测试结果
-    const result = `测试文本: "${testText}"\n` +
-                  `配置的关键词: [${TRIGGER_KEYWORDS.join(', ')}]\n` +
-                  `匹配结果: ${containsTriggerKeyword ? '✅ 匹配成功' : '❌ 未匹配'}\n` +
-                  `匹配的关键词: [${matchedKeywords.join(', ')}]\n` +
-                  `当前模式: ${this.toggleMode}`;
-
-    await this.reply(result, true)
-    return true
   }
 
   /**
@@ -383,8 +441,16 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
    * @returns {Promise<void>}
    */
   async destroyConversations (e) {
-    let manager = new ConversationManager(e)
-    await manager.endConversation.bind(this)(e)
+    const confirmationKey = e.isGroup ? e.group_id : e.sender.user_id;
+    pendingConfirmations.set(confirmationKey, { action: 'destroy', e: e });
+
+    setTimeout(() => {
+      if (pendingConfirmations.has(confirmationKey) && pendingConfirmations.get(confirmationKey).action === 'destroy') {
+        pendingConfirmations.delete(confirmationKey);
+      }
+    }, 60000); // 60秒后自动取消
+
+    await this.reply('确认结束当前对话吗？回复“#确认”以继续，或“#取消”以取消操作', true);
   }
 
   /**
@@ -395,8 +461,78 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
    * @returns {Promise<void>}
    */
   async endAllConversations (e) {
-    let manager = new ConversationManager(e)
-    await manager.endAllConversations.bind(this)(e)
+    const confirmationKey = e.sender.user_id; // 全部对话只能由master发起，用user_id作为key
+    pendingConfirmations.set(confirmationKey, { action: 'destroyAll', e: e });
+
+    setTimeout(() => {
+      if (pendingConfirmations.has(confirmationKey) && pendingConfirmations.get(confirmationKey).action === 'destroyAll') {
+        pendingConfirmations.delete(confirmationKey);
+      }
+    }, 60000); // 60秒后自动取消
+
+    await this.reply('确认结束全部对话吗？回复“#确认”以继续，或“#取消”以取消操作', true);
+  }
+
+  /**
+   * 确认执行待定操作
+   * @param {object} e - 事件对象
+   */
+  async confirmAction(e) {
+    const confirmationKey = e.isGroup ? e.group_id : e.sender.user_id;
+    const pending = pendingConfirmations.get(confirmationKey);
+
+    if (!pending) {
+      await this.reply('当前没有需要确认的操作。', true);
+      return;
+    }
+
+    // 权限验证：确保在群里发起，在群里确认；私聊发起，私聊确认。
+    // 对于endAll，必须是同一个人确认。
+    if (pending.e.isGroup !== e.isGroup || pending.e.sender.user_id !== e.sender.user_id) {
+        if (pending.action !== 'destroyAll' || pending.e.sender.user_id !== e.sender.user_id) {
+            await this.reply('无效确认。请在发起指令的聊天中进行确认。', true);
+            return;
+        }
+    }
+
+    let manager = new ConversationManager(pending.e);
+    
+    if (pending.action === 'destroy') {
+      await manager.endConversation.bind(this)(pending.e);
+    } else if (pending.action === 'destroyAll') {
+      // 再次检查权限
+      if (!pending.e.isMaster) {
+          await this.reply('无权限执行此操作。', true);
+          pendingConfirmations.delete(confirmationKey);
+          return;
+      }
+      await manager.endAllConversations.bind(this)(pending.e);
+    }
+
+    pendingConfirmations.delete(confirmationKey); // 清除待确认状态
+  }
+
+  /**
+   * 取消待定的操作
+   * @param {object} e - 事件对象
+   */
+  async cancelAction(e) {
+    const confirmationKey = e.isGroup ? e.group_id : e.sender.user_id;
+    const pending = pendingConfirmations.get(confirmationKey);
+
+    if (!pending) {
+      await this.reply('当前没有需要取消的操作。', true);
+      return;
+    }
+
+    // 权限验证
+    if (pending.e.sender.user_id !== e.sender.user_id) {
+      await this.reply('无效操作。请由发起指令的用户取消。', true);
+      return;
+    }
+
+    pendingConfirmations.delete(confirmationKey);
+    await this.reply('操作已取消。', true);
   }
 
   /**
@@ -531,8 +667,15 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
     let prompt                 // 将要发送给AI的提示文本
     let forcePictureMode = false  // 是否强制使用图片模式回复
     
-    // 生成对话键，用于消息缓冲和续接对话
-    const conversationKey = e.isGroup && Config.groupMerge ? `group_${e.group_id}` : `user_${e.sender.user_id}`;
+    // 生成对话键：群聊和私聊独立，且同一用户在不同场景下不混用
+    let conversationKey;
+    if (e.isGroup) {
+      // 群聊场景，按群号+用户号区分
+      conversationKey = `group_${e.group_id}_${e.sender.user_id}`;
+    } else {
+      // 私聊场景
+      conversationKey = `private_${e.sender.user_id}`;
+    }
     
     // ==================== 回复消息处理逻辑 ====================
     let replyContent = ''  // 存储被回复消息的内容
@@ -566,8 +709,8 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
     ) : [];
     const containsTriggerKeyword = matchedKeywords.length > 0;
     
-    // 检查用户续接状态
-    const canContinue = canUserContinue(conversationKey, e.sender.user_id);
+  // 检查用户续接状态（续接状态也要用新的key）
+  const canContinue = canUserContinue(conversationKey, e.sender.user_id);
     
     // 添加详细的匹配日志
     if (containsTriggerKeyword) {
@@ -796,8 +939,8 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
     
     logger.info(`[ChatGPT Debug] 消息已缓冲， 当前缓冲消息数: ${buffer.messages.length}, 消息内容: '${buffer.messages[buffer.messages.length - 1]}'`);
 
-    // 设置用户续接对话状态，允许后续消息无需关键词或@触发
-    setUserContinuationState(conversationKey, e.sender.user_id);
+  // 设置用户续接对话状态，允许后续消息无需关键词或@触发
+  setUserContinuationState(conversationKey, e.sender.user_id);
 
     // 清除任何现有的定时器
     if (buffer.timer) {
@@ -894,7 +1037,13 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
    * @param {string|null} requestId - 请求ID，用于防止重复处理
    */
   async abstractChat (e, prompt, use, forcePictureMode = false, requestId = null) {
-    const conversationKey = e.isGroup && Config.groupMerge ? `group_${e.group_id}` : `user_${e.sender.user_id}`;
+    // 生成对话键：群聊和私聊独立，且同一用户在不同场景下不混用
+    let conversationKey;
+    if (e.isGroup) {
+      conversationKey = `group_${e.group_id}_${e.sender.user_id}`;
+    } else {
+      conversationKey = `private_${e.sender.user_id}`;
+    }
     let previousConversation, conversation, key; // 变量声明提前
 
     // ==================== 请求有效性检查 ====================
@@ -1003,6 +1152,10 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
       
       // ==================== 调用AI核心处理模块 ====================
       // 这是整个插件的核心：将用户输入发送给AI并获取回复
+      
+      // 记录API调用
+      recordApiCall(e.sender.user_id);
+      
       let chatMessage = await Core.sendMessage.bind(this)(prompt, conversation, use, e)
 
       // 新增：检查API调用返回后，是否已经被新消息打断并合并
@@ -1146,7 +1299,7 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
           // ==================== 逐个发送表情图片 ====================
           // 遍历所有表情图片，逐个发送以确保良好的用户体验
           for (const imageSegment of imagesToSend) {
-            await this.reply(imageSegment, false); // 图片消息通常不需要引用回复
+            await this.reply(imageSegment, false); // 图片消息通常不需要引用
             
             // 图片间添加短暂延迟，避免发送过快
             await new Promise((resolve) => {
@@ -1694,6 +1847,32 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
       // ==================== 提取被回复消息的文本内容 ====================
       if (originalMessage) {
         let replyText = ''
+        let replyContent = '' // 在这里初始化 replyContent
+
+        // 新增：如果引用了文件，读取文件内容
+        if (e.source?.file) {
+            const file = e.source.file;
+            logger.info(`[Chat] 检测到引用文件: ${file.name}, 大小: ${file.size}`);
+            try {
+                const response = await fetch(file.url);
+                if (response.ok) {
+                    const content = await response.text();
+                    let fileContent = '';
+                    if (content.length > 200) {
+                        fileContent = content.substring(0, 200);
+                        logger.info(`[Chat] 文件 ${file.name} 内容读取成功 (截取前200字符)。`);
+                    } else {
+                        fileContent = content;
+                        logger.info(`[Chat] 文件 ${file.name} 内容读取成功 (全文)。`);
+                    }
+                    replyContent += `【以下是引用的文件'${file.name}'中的内容】:\n${fileContent}\n`;
+                } else {
+                    logger.error(`[Chat] 下载文件 ${file.name} 失败，状态码: ${response.status}`);
+                }
+            } catch (error) {
+                logger.error(`[Chat] 读取或处理文件 ${file.name} 时出错:`, error);
+            }
+        }
         
         logger.info(`[ChatGPT Debug] 原始消息结构: ${JSON.stringify(originalMessage)}`)
         
@@ -1722,6 +1901,36 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
               }
             } else if (segment.type === 'video') {
               replyText += '[视频]'
+            } else if (segment.type === 'file' && segment.file) {
+              // 新增：处理文件类型的消息段
+              // 尝试从 e.source 获取更完整的文件信息，包括 URL
+              if (e.source?.file?.url) {
+                 try {
+                    const response = await fetch(e.source.file.url);
+                    if (response.ok) {
+                        const content = await response.text();
+                        let fileContent = '';
+                        if (content.length > 200) {
+                            fileContent = content.substring(0, 200);
+                            logger.info(`[Chat] 文件 ${e.source.file.name} 内容读取成功 (截取前200字符)。`);
+                        } else {
+                            fileContent = content;
+                            logger.info(`[Chat] 文件 ${e.source.file.name} 内容读取成功 (全文)。`);
+                        }
+                        // 将文件内容直接加入 replyText
+                        replyText += `\n【以下是引用的文件'${e.source.file.name}'中的内容】:\n${fileContent}\n`;
+                    } else {
+                        logger.error(`[Chat] 下载文件 ${e.source.file.name} 失败，状态码: ${response.status}`);
+                        replyText += `[文件: ${segment.file}]`;
+                    }
+                } catch (error) {
+                    logger.error(`[Chat] 读取或处理文件 ${e.source.file.name} 时出错:`, error);
+                    replyText += `[文件: ${segment.file}]`;
+                }
+              } else {
+                logger.warn(`[Chat] 未能获取文件 ${segment.file} 的下载链接，仅记录文件名。`);
+                replyText += `[文件: ${segment.file}]`;
+              }
             }
           }
         } else if (typeof originalMessage.raw_message === 'string') {
@@ -1806,6 +2015,51 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
     // 调用抽象聊天处理函数进行实际的AI对话
     await this.abstractChat(e, prompt, mode, forcePictureMode)
     return true
+  }
+    // 聊天记录备份到本地
+  async backupConversation(e) {
+    const userId = e.sender.user_id;
+    const key = `CHATGPT:CONVERSATIONS:${userId}`;
+    const filePath = path.join(__dirname, 'chat_history', `${userId}.json`);
+    try {
+      const data = await redis.get(key);
+      if (!data) {
+        await this.reply('未找到你的聊天记录，无法备份。', true);
+        return true;
+      }
+      fs.writeFileSync(filePath, data, 'utf8');
+      await this.reply(`聊天记录已备份到本地：${filePath}`);
+    } catch (err) {
+      logger.error(`[备份聊天记录] 失败: ${err}`);
+      await this.reply('备份失败，请检查日志。', true);
+    }
+    return true;
+  }
+
+  // 聊天记录恢复/继承
+  async restoreConversation(e) {
+    const match = e.msg.match(/^#恢复(\d+)$/);
+    if (!match) {
+      await this.reply('格式错误，应为#恢复QQ号', true);
+      return true;
+    }
+    const fromId = match[1];
+    const filePath = path.join(__dirname, 'chat_history', `${fromId}.json`);
+    const toId = e.sender.user_id;
+    const key = `CHATGPT:CONVERSATIONS:${toId}`;
+    try {
+      if (!fs.existsSync(filePath)) {
+        await this.reply('未找到该QQ号的聊天记录备份文件。', true);
+        return true;
+      }
+      const data = fs.readFileSync(filePath, 'utf8');
+      await redis.set(key, data);
+      await this.reply(`已继承QQ号${fromId}的聊天记录。`);
+    } catch (err) {
+      logger.error(`[恢复聊天记录] 失败: ${err}`);
+      await this.reply('恢复失败，请检查日志。', true);
+    }
+    return true;
   }
 }
 
