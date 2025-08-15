@@ -217,7 +217,7 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
       name: 'ChatGpt 对话',
       dsc: '与人工智能对话，畅聊无限可能~',
       event: 'message',
-      priority: 1144,/** 优先级，数字越小等级越高 */
+      priority: -114514,/** 优先级，数字越小等级越高 */
   rule: [
         // ==================== 聊天记录备份与恢复 ====================
         {
@@ -1451,6 +1451,15 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
           logger.error('语音合成或发送失败：', error)
           await this.reply('语音合成或发送失败，请检查日志。', true)
         }
+        return // 执行完语音回复后立即返回，不执行后续逻辑
+      }
+      // ==================== 语音回复功能处理2 ====================
+      // 新增：处理 [[语音2]] 标记并发送语音回复
+      if (response.includes('[[语音2]]')) {
+        response = response.replace('[[语音2]]', '').trim() // 移除标记
+          const { FishGenerateAudio } = await import('./fish.js')
+          await FishGenerateAudio(e,response)
+          await this.reply(response, e.isGroup) 
         return // 执行完语音回复后立即返回，不执行后续逻辑
       }
       

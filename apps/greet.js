@@ -386,7 +386,7 @@ export class Greet extends plugin {
         // 尝试解析JSON
         try {
           this.messageWaitRecords = JSON.parse(data)
-          console.log('[定时问候] 消息等待记录文件加载成功，记录数量：', Object.keys(this.messageWaitRecords).length)
+          // console.log('[定时问候] 消息等待记录文件加载成功，记录数量：', Object.keys(this.messageWaitRecords).length)
         } catch (parseError) {
           console.error('[定时问候] 消息等待记录JSON解析失败，文件内容：', data)
           console.error('[定时问候] 消息等待记录JSON解析错误详情：', parseError.message)
@@ -580,7 +580,7 @@ export class Greet extends plugin {
    */
   isUserEnabled(userId) {
     const isEnabled = this.userConfigs[userId] === 'on'
-    console.log(`[定时问候] 检查用户 ${userId} 状态：${isEnabled ? '已开启' : '未开启'}`)
+    // console.log(`[定时问候] 检查用户 ${userId} 状态：${isEnabled ? '已开启' : '未开启'}`)
     return isEnabled
   }
 
@@ -594,13 +594,13 @@ export class Greet extends plugin {
         // 尝试从全局获取机器人实例
         if (typeof Bot !== 'undefined' && Bot.uin) {
           this.bot = Bot;
-          console.log('[定时问候] 自动获取到机器人实例。');
+          // console.log('[定时问候] 自动获取到机器人实例。');
         } else {
-          console.log('[定时问候] 机器人实例未就绪，跳过扫描。');
+          // console.log('[定时问候] 机器人实例未就绪，跳过扫描。');
           return;
         }
       } catch (error) {
-        console.log('[定时问候] 获取机器人实例失败，跳过扫描。');
+        // console.log('[定时问候] 获取机器人实例失败，跳过扫描。');
         return;
       }
     }
