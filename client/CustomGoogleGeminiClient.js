@@ -163,7 +163,7 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
       if (opt.audio && opt.audio.data) {
         diagnosticInfo.audioSize = opt.audio.data.length;
       }
-      logger.info(`[Gemini Client] 发送Gemini请求。详情: ${JSON.stringify(diagnosticInfo)}`);
+      // logger.info(`[Gemini Client] 发送Gemini请求。详情: ${JSON.stringify(diagnosticInfo)}`);
     } catch (logError) {
       logger.warn(`[Gemini Client] 记录诊断日志时出错: ${logError.message}`);
     }

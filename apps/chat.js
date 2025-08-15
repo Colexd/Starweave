@@ -219,20 +219,20 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
       event: 'message',
       priority: 1144,/** 优先级，数字越小等级越高 */
   rule: [
-    // ==================== 聊天记录备份与恢复 ====================
-    {
-      reg: '^#备份$',
-      fnc: 'backupConversation'
-    },
-    {
-      reg: '^#恢复(\\d+)$',
-      fnc: 'restoreConversation'
-    },
-    // ==================== 时间查询规则 ====================
-    {
-      reg: '^#当前时间$',           // 正则：查询当前时间
-      fnc: 'getCurrentTime'         // 对应的处理函数
-    },
+        // ==================== 聊天记录备份与恢复 ====================
+        {
+          reg: '^#备份$',
+          fnc: 'backupConversation'
+        },
+        {
+          reg: '^#恢复(\\d+)$',
+          fnc: 'restoreConversation'
+        },
+        // ==================== 时间查询规则 ====================
+        {
+          reg: '^#当前时间$',           // 正则：查询当前时间
+          fnc: 'getCurrentTime'         // 对应的处理函数
+        },
         // ==================== 默认聊天规则 ====================
         {
           // 根据切换模式决定是艾特触发还是 #chat 触发，如果是at模式则使用at触发，如果是chat模式则使用chat触发
@@ -304,7 +304,7 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
    * @returns {boolean} - 是否成功处理
    */
   async getCurrentTime (e) {
-    logger.info(`[getCurrentTime] 函数被调用。消息: ${e.msg}`);
+    // logger.info(`[getCurrentTime] 函数被调用。消息: ${e.msg}`);
     
     // 使用 moment 格式化当前时间
     const currentTime = moment().format('YYYY年MM月DD日 HH:mm:ss')
@@ -718,7 +718,7 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
     }
     
     if (canContinue) {
-      logger.info(`[ChatGPT] 续接对话检测: 用户 ${e.sender.user_id} 可以续接对话`)
+      // logger.info(`[ChatGPT] 续接对话检测: 用户 ${e.sender.user_id} 可以续接对话`)
     }
     
     // ==================== 处理回复消息的多种方式 ====================
@@ -761,7 +761,7 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
       
       // 如果是通过续接对话触发，添加日志记录
       if (canContinue && !(e.atme || e.atBot || (e.at === e.self_id) || containsTriggerKeyword)) {
-        logger.info(`[ChatGPT] 通过续接对话触发: 用户 ${e.sender.user_id} 在对话窗口期内续接对话`)
+        // logger.info(`[ChatGPT] 通过续接对话触发: 用户 ${e.sender.user_id} 在对话窗口期内续接对话`)
       }
       
       // 处理群聊中的艾特信息，移除艾特文本
@@ -799,43 +799,6 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
       } catch (err) {
         logger.warn(err)
       }
-    // } else {// 命令模式：通过#chat触发或触发关键词
-      
-    //   let ats = e.message.filter(m => m.type === 'at')  // 获取艾特列表
-      
-    //   // 检查是否为#chat命令
-    //   const isChatCommand = e.msg.trimStart().startsWith('#chat') || e.msg.trimStart().startsWith('#图片chat')
-      
-    //   // 如果不是#chat命令也不包含触发关键词，则不处理
-    //   if (!isChatCommand && !containsTriggerKeyword) {
-    //     return false
-    //   }
-      
-    //   if (!(e.atme || e.atBot || containsTriggerKeyword) && ats.length > 0) {
-    //     if (Config.debug) {
-    //       logger.mark('艾特别人了，没艾特我也没有触发关键词，忽略')
-    //     }
-    //     return false
-    //   }
-      
-    //   // 检查是否为图片模式
-    //   if (e.msg.trimStart().startsWith('#图片chat')) {
-    //     forcePictureMode = true
-    //   }
-      
-    //   // 提取命令后的内容
-    //   if (isChatCommand) {
-    //     prompt = _.replace(e.msg.trimStart(), /#(图片)?chat/, '').trim()
-    //   } else if (containsTriggerKeyword) {
-    //     // 如果是通过关键词触发，使用完整消息内容
-    //     prompt = msg.trim()
-    //     logger.info(`[ChatGPT] 命令模式通过关键词触发: 用户 ${e.sender.user_id} 发送消息包含触发词`)
-    //   }
-      
-    //   if (prompt.length === 0) {
-    //     return false  // 空内容不处理
-    //   }
-    // }
     
     let groupId = e.isGroup ? e.group.group_id : ''  // 群号（如果是群聊）
 
@@ -872,9 +835,9 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
     // ==================== 构造最终的prompt ====================
     // 整合所有内容到prompt
     prompt = `${directAudioUrlContent}${replyContent}${prompt}`;
-    if (prompt) {
-      logger.info(`[ChatGPT] 整合后，最终prompt: ${prompt}`);
-    }
+    // if (prompt) {
+    //   logger.info(`[ChatGPT] 整合后，最终prompt: ${prompt}`);
+    // }
 
 
     // ==================== 添加日期时间前缀 ====================
@@ -883,7 +846,6 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
     const currentDateTime = `${now.getFullYear()}年${String(now.getMonth() + 1).padStart(2, '0')}月${String(now.getDate()).padStart(2, '0')}日 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
 
     prompt = `当前日期时间：${currentDateTime} 对话人QQ号：${e.sender.user_id}  用户消息：${prompt}`
-    // logger.info(`[ChatGPT] 已添加日期时间前缀，最终prompt: ${prompt}`)
 
     // ==================== 消息缓冲和延迟处理机制 ====================
     // 【恢复】消息缓冲和等待机制 (回到之前5秒延迟的模式)
@@ -925,7 +887,6 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
             use: use,              // AI模型
             forcePictureMode: forcePictureMode  // 强制图片模式
           });
-          // logger.info(`[ChatGPT] 为 ${conversationKey} 创建新的消息缓冲。`);
       }
       chatMessageBuffers.get(conversationKey).messages.push(prompt);
     }
@@ -1007,7 +968,7 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
       // 为这个请求生成一个唯一的ID，用于防止重复处理
       const requestId = Date.now().toString();
       pendingRequests.set(conversationKey, requestId);
-      logger.info(`[ChatGPT Debug] 为对话键 ${conversationKey} 生成新的请求 ID: ${requestId}`);
+      // logger.info(`[ChatGPT Debug] 为对话键 ${conversationKey} 生成新的请求 ID: ${requestId}`);
       
       // 清空缓冲列表和定时器引用
       currentBuffer.messages = [];
@@ -1880,52 +1841,57 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
         if (originalMessage.message && Array.isArray(originalMessage.message)) {
           for (let segment of originalMessage.message) {
             if (segment.type === 'text') {
-              replyText += segment.text
+          replyText += segment.text;
             } else if (segment.type === 'image') {
-              if (segment.url) {
-                replyText += `[[IMAGE_URL=${segment.url}]]`;
-                logger.info(`[ChatGPT Debug] 提取到引用图片URL: ${segment.url}`);
-              } else {
-                replyText += '[图片]';
-              }
+          if (segment.url) {
+            replyText += `[[IMAGE_URL=${segment.url}]]`;
+            logger.info(`[ChatGPT Debug] 提取到引用图片URL: ${segment.url}`);
+          } else {
+            replyText += '[图片]';
+          }
             } else if (segment.type === 'face') {
-              replyText += '[表情]'
+          replyText += '[表情]';
             } else if (segment.type === 'at') {
-              replyText += `@${segment.text || segment.qq}`
+          replyText += `@${segment.text || segment.qq}`;
             } else if (segment.type === 'record') {
-              if (segment.url) {
-                replyText += `[[AUDIO_URL=${segment.url}]]`;
-                // logger.info(`[ChatGPT Debug] 提取到语音消息URL: ${segment.url}`);
-              } else {
-                replyText += '[语音]';
-              }
+          if (segment.url) {
+            replyText += `[[AUDIO_URL=${segment.url}]]`;
+            // logger.info(`[ChatGPT Debug] 提取到语音消息URL: ${segment.url}`);
+          } else {
+            replyText += '[语音]';
+          }
             } else if (segment.type === 'video') {
-              replyText += '[视频]'
+              if (segment.url) {
+                replyText += `[[VIDEO_URL=${segment.url}]]`;
+                logger.info(`[ChatGPT Debug] 提取到引用视频URL: ${segment.url}`);
+              } else {
+                replyText += '[视频]';
+              }
             } else if (segment.type === 'file' && segment.file) {
               // 新增：处理文件类型的消息段
               // 尝试从 e.source 获取更完整的文件信息，包括 URL
               if (e.source?.file?.url) {
-                 try {
-                    const response = await fetch(e.source.file.url);
-                    if (response.ok) {
-                        const content = await response.text();
-                        let fileContent = '';
-                        if (content.length > 200) {
-                            fileContent = content.substring(0, 200);
-                            logger.info(`[Chat] 文件 ${e.source.file.name} 内容读取成功 (截取前200字符)。`);
-                        } else {
-                            fileContent = content;
-                            logger.info(`[Chat] 文件 ${e.source.file.name} 内容读取成功 (全文)。`);
-                        }
-                        // 将文件内容直接加入 replyText
-                        replyText += `\n【以下是引用的文件'${e.source.file.name}'中的内容】:\n${fileContent}\n`;
+                try {
+                  const response = await fetch(e.source.file.url);
+                  if (response.ok) {
+                    const content = await response.text();
+                    let fileContent = '';
+                    if (content.length > 200) {
+                      fileContent = content.substring(0, 200);
+                      logger.info(`[Chat] 文件 ${e.source.file.name} 内容读取成功 (截取前200字符)。`);
                     } else {
-                        logger.error(`[Chat] 下载文件 ${e.source.file.name} 失败，状态码: ${response.status}`);
-                        replyText += `[文件: ${segment.file}]`;
+                      fileContent = content;
+                      logger.info(`[Chat] 文件 ${e.source.file.name} 内容读取成功 (全文)。`);
                     }
-                } catch (error) {
-                    logger.error(`[Chat] 读取或处理文件 ${e.source.file.name} 时出错:`, error);
+                    // 将文件内容直接加入 replyText
+                    replyText += `\n【以下是引用的文件'${e.source.file.name}'中的内容】：\n${fileContent}\n`;
+                  } else {
+                    logger.error(`[Chat] 下载文件 ${e.source.file.name} 失败，状态码: ${response.status}`);
                     replyText += `[文件: ${segment.file}]`;
+                  }
+                } catch (error) {
+                  logger.error(`[Chat] 读取或处理文件 ${e.source.file.name} 时出错:`, error);
+                  replyText += `[文件: ${segment.file}]`;
                 }
               } else {
                 logger.warn(`[Chat] 未能获取文件 ${segment.file} 的下载链接，仅记录文件名。`);

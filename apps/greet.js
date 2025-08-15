@@ -65,7 +65,7 @@ export class Greet extends plugin {
     })
     // 真正实现单例模式
     if (Greet.instance) {
-      console.log('[定时问候] 检测到重复实例化，将返回现有实例。');
+      // console.log('[定时问候] 检测到重复实例化，将返回现有实例。');
       // 清理当前（重复）实例可能已经创建的定时器
       if (this.scanInterval) clearInterval(this.scanInterval);
       if (this.hourlyInterval) clearInterval(this.hourlyInterval);
@@ -75,7 +75,7 @@ export class Greet extends plugin {
 
     // 防止重复实例化
     if (Greet.instance) {
-      console.log('[定时问候] 检测到重复实例化，清理旧实例的定时器。');
+      // console.log('[定时问候] 检测到重复实例化，清理旧实例的定时器。');
       const oldInstance = Greet.instance;
       if (oldInstance.scanInterval) {
         clearInterval(oldInstance.scanInterval);
@@ -469,7 +469,7 @@ export class Greet extends plugin {
     }
     
     const waitingUsersCount = Object.keys(this.messageWaitRecords).length
-    console.log(`[定时问候] 开始检查消息等待状态，共 ${enabledUsers.length} 个开启用户，等待中用户数: ${waitingUsersCount}`)
+    // console.log(`[定时问候] 开始检查消息等待状态，共 ${enabledUsers.length} 个开启用户，等待中用户数: ${waitingUsersCount}`)
     
     let processedCount = 0
     let sentCount = 0
@@ -609,7 +609,7 @@ export class Greet extends plugin {
     this.loadRunConfig(true);
     
     if (!this.runConfig.shouldSend || !this.runConfig.nextGreetingTime) {
-      console.log('[定时问候] 无问候计划或时间未设置，跳过扫描。');
+      // console.log('[定时问候] 无问候计划或时间未设置，跳过扫描。');
       return;
     }
 
