@@ -115,7 +115,7 @@ async function handleSystem (e, system, settings) {
 }
 
 class Core {
-  async sendMessage (prompt, conversation = {}, use, e, opt = {
+  async sendMessage (prompt, conversation = {}, use, e, signal = null, opt = { // <<< 1. 在这里添加 signal 参数
     enableSmart: Config.smartMode,
     system: {
       api: Config.promptPrefixOverride,
@@ -148,7 +148,8 @@ class Core {
         key: Config.getGeminiKey(),
         model: Config.geminiModel,
         baseUrl: Config.geminiBaseUrl,
-        debug: Config.debug
+        debug: Config.debug,
+        fetch: (url, options) => newFetch(url, { ...options, signal }) // <<< 2. 将 signal 注入到客户端的 fetch 中
       })
       let option = {
         stream: false,
@@ -160,12 +161,13 @@ class Core {
         parentMessageId: conversation.parentMessageId,
         conversationId: conversation.conversationId,
         search: Config.geminiEnableGoogleSearch,
-        codeExecution: Config.geminiEnableCodeExecution
+        codeExecution: Config.geminiEnableCodeExecution,
+        signal: signal // <<< 3. 将 signal 也直接传递给 option
       }
       const image = await getImg(e)
       let imageUrl = image ? image[0] : undefined
       if (imageUrl) {
-        const response = await fetch(imageUrl)
+        const response = await fetch(imageUrl, { signal }) // <<< 4. 给 fetch 添加 signal
         const base64Image = Buffer.from(await response.arrayBuffer())
         option.image = base64Image.toString('base64')
       }
@@ -174,7 +176,7 @@ class Core {
       if (conversation.audioUrl) {
         try {
           logger.info(`[Gemini] 正在从URL获取语音文件: ${conversation.audioUrl}`);
-          const response = await fetch(conversation.audioUrl);
+          const response = await fetch(conversation.audioUrl, { signal }); // <<< 5. 给 fetch 添加 signal
           if (!response.ok) {
             throw new Error(`获取语音文件失败: ${response.statusText}`);
           }
@@ -187,8 +189,9 @@ class Core {
           };
           logger.info(`[Gemini] 已成功处理语音文件，准备发送至API。`);
         } catch (err) {
-          logger.error(`[Gemini] 处理语音URL时出错: ${err}`);
-          // 如果出错，仅记录日志，不中断流程
+           if (err.name !== 'AbortError') {
+             logger.error(`[Gemini] 处理语音URL时出错: ${err}`);
+           }
         }
       }
 
@@ -196,7 +199,7 @@ class Core {
       if (conversation.imageUrl) {
         try {
           logger.info(`[Gemini] 正在从URL获取引用图片: ${conversation.imageUrl}`);
-          const response = await fetch(conversation.imageUrl);
+          const response = await fetch(conversation.imageUrl, { signal }); // <<< 6. 给 fetch 添加 signal
           if (!response.ok) {
             throw new Error(`获取引用图片失败: ${response.statusText}`);
           }
@@ -206,8 +209,9 @@ class Core {
           option.image = base64Image;
           logger.info(`[Gemini] 已成功处理引用图片，准备发送至API。`);
         } catch (err) {
-          logger.error(`[Gemini] 处理引用图片URL时出错: ${err}`);
-          // 如果出错，仅记录日志，不中断流程
+          if (err.name !== 'AbortError') {
+            logger.error(`[Gemini] 处理引用图片URL时出错: ${err}`);
+          }
         }
       }
 

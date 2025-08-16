@@ -40,7 +40,7 @@ const __filename = fileURLToPath(import.meta.url); // 当前文件的绝对路�
 const __dirname = path.dirname(__filename); // 当前文件所在目录的绝对路径
 const chatMessageBuffers = new Map();//消息缓冲区 - 存储每个用户/群的消息缓冲和定时器
 const interruptionFlags = new Map();//中断标志映射 - 用于标记对话是否被中断
-const pendingRequests = new Map();//挂起请求映射 - 用于跟踪正在处理的请求
+const pendingRequests = new Map();//挂起请求映射 - 用于跟踪并中止正在处理的请求
 const userContinuationStates = new Map();//用户续接对话状态 - 跟踪最近与AI交互的用户，允许续接对话
 const processingPrompts = new Map(); // 新增：存储正在调用API的prompt
 const pendingConfirmations = new Map(); // 用于销毁对话前的确认
@@ -112,7 +112,7 @@ const TRIGGER_KEYWORDS = [
 
 // ==================== 续接对话配置 ====================
 // 用户在触发关键词或被@后，可以续接对话的时间窗口（毫秒）
-const CONTINUATION_TIMEOUT = 5 * 60 * 1000; // 5分钟
+const CONTINUATION_TIMEOUT = 1 * 20 * 1000; // 0.33分钟
 
 /**
  * 设置用户续接对话状态
@@ -238,7 +238,7 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
           // 根据切换模式决定是艾特触发还是 #chat 触发，如果是at模式则使用at触发，如果是chat模式则使用chat触发
           reg: toggleMode === 'at' ? '^[^#][sS]*' : '^#(图片)?chat[^gpt][sS]*',
           fnc: 'chatgpt',  // 默认聊天处理函数
-          log: false       // 不记录日志
+          log: true       // 不记录日志
         },
         // ==================== 对话管理规则 ====================
         {
@@ -663,9 +663,13 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
    * @returns {boolean} - 是否成功处理消息
    */
   async chatgpt (e) {///////////////////////////////////////////////////////////ChatGPT主要对话处理方法
-    let msg = e.msg            // 用户发送的消息
+    let msg = e.msg || e.raw_message || ''; // 优先用 e.msg，如果没有则用 e.raw_message
     let prompt                 // 将要发送给AI的提示文本
     let forcePictureMode = false  // 是否强制使用图片模式回复
+    // logger.mark('进入 chatgpt 函数');
+    // logger.mark(`e.msg 的值: [${e.msg}]`);
+    // logger.mark(`e.msg 的类型: ${typeof e.msg}`);
+    // logger.mark(`e.raw_message 的值: [${e.raw_message}]`);
     
     // 生成对话键：群聊和私聊独立，且同一用户在不同场景下不混用
     let conversationKey;
@@ -704,11 +708,11 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
      
     // ==================== 消息预处理 ====================
     // 检查消息是否包含触发关键词（先确保msg存在且为字符串）
-    const matchedKeywords = (msg && typeof msg === 'string') ? TRIGGER_KEYWORDS.filter(keyword => 
-      msg.toLowerCase().includes(keyword.toLowerCase())
-    ) : [];
+    const rawMsg = e.raw_message || ''; // 确保 raw_message 存在且为字符串
+    const matchedKeywords = TRIGGER_KEYWORDS.filter(keyword => 
+      rawMsg.toLowerCase().includes(keyword.toLowerCase())
+    );
     const containsTriggerKeyword = matchedKeywords.length > 0;
-    
   // 检查用户续接状态（续接状态也要用新的key）
   const canContinue = canUserContinue(conversationKey, e.sender.user_id);
     
@@ -746,8 +750,9 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
       }
       
       // 修改条件：艾特机器人、包含触发关键词、可以续接对话、或在私聊中发语音
-      if ((e.isGroup || e.group_id) && !(e.atme || e.atBot || (e.at === e.self_id) || containsTriggerKeyword || canContinue)) {
-        return false  // 群聊中必须满足条件
+      if (e.isGroup && !e.atme && !e.atBot && !containsTriggerKeyword && !canContinue) {
+        logger.info(`[ChatGPT] 群聊中未满足任何触发条件，忽略消息。用户ID: ${e.user_id}`)
+        return false; // 在群聊中，必须满足以上至少一个条件
       }
       
       if (e.user_id == getUin(e)) return false  // 忽略机器人自己的消息
@@ -853,39 +858,51 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
     // 设置中断标志
     interruptionFlags.set(conversationKey, true);
 
-    // 新增：检查是否有正在处理的API调用，并合并消息
+    // ==================== 消息缓冲和延迟处理机制 ====================
+    // 设置中断标志
+    interruptionFlags.set(conversationKey, true);
+
+    // 检查是否有正在处理的API调用
     if (processingPrompts.has(conversationKey)) {
+      // **新增：中止上一个正在进行的API请求**
+      if (pendingRequests.has(conversationKey)) {
+        const { controller } = pendingRequests.get(conversationKey);
+        if (controller) {
+          controller.abort(); // 发出中止信号
+          logger.info(`[ChatGPT] 已中止对话键 ${conversationKey} 的上一个API请求。`);
+        }
+        // pendingRequests.delete(conversationKey) 会在 abstractChat 的 finally 中处理
+      }
+
+      // 合并消息逻辑
       const oldPrompt = processingPrompts.get(conversationKey);
-      // 从新旧prompt中提取纯粹的用户消息部分
       const oldUserMessage = oldPrompt.match(/用户消息：(.*)$/)?.[1] || '';
       const newUserMessage = prompt.match(/用户消息：(.*)$/)?.[1] || '';
       
-      // 找到旧消息的前缀
       const prefixMatch = oldPrompt.match(/^(当前日期时间：.*?用户消息：)/);
       if (prefixMatch) {
         const prefix = prefixMatch[1];
-        // 将新消息追加到旧消息后面，形成新的完整prompt
         prompt = prefix + oldUserMessage + ' ' + newUserMessage;
         logger.info(`[ChatGPT] API调用被打断，新旧消息已合并。合并后: '${prompt}'`);
       }
+      
       // 将合并后的消息作为当前缓冲区的第一条消息
-      if (chatMessageBuffers.has(conversationKey)) {
-        chatMessageBuffers.get(conversationKey).messages = [prompt];
-      } else {
-        // 如果万一没有缓冲区，就创建一个
-        chatMessageBuffers.set(conversationKey, { messages: [prompt], timer: null, e: null, use: use, forcePictureMode: forcePictureMode });
+      const buffer = chatMessageBuffers.get(conversationKey) || { messages: [], timer: null, e: null, use: use, forcePictureMode: forcePictureMode };
+      buffer.messages = [prompt];
+      if (!chatMessageBuffers.has(conversationKey)) {
+          chatMessageBuffers.set(conversationKey, buffer);
       }
-      processingPrompts.delete(conversationKey); // 清除旧的标记
+      
+      // 注意：这里的 processingPrompts.delete 逻辑移动到 abstractChat 的 finally 块中，以确保状态一致性
     } else {
       // 原始逻辑：将新消息添加到缓冲区
-      // 初始化消息缓冲区（如果不存在）
       if (!chatMessageBuffers.has(conversationKey)) {
           chatMessageBuffers.set(conversationKey, { 
-            messages: [],           // 消息数组
-            timer: null,           // 定时器
-            e: null,               // 事件对象
-            use: use,              // AI模型
-            forcePictureMode: forcePictureMode  // 强制图片模式
+            messages: [],
+            timer: null,
+            e: null,
+            use: use,
+            forcePictureMode: forcePictureMode
           });
       }
       chatMessageBuffers.get(conversationKey).messages.push(prompt);
@@ -940,41 +957,34 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
           return;
       }
 
-      // 合并所有缓冲的消息
+      // ... (你现有的合并 prompt 的逻辑) ...
       let combinedPrompt;
       if (currentBuffer.messages.length === 1) {
-        // 只有一条消息时直接使用
         combinedPrompt = currentBuffer.messages[0];
       } else {
-        // 多条消息时，提取第一条消息的前缀和所有消息的用户内容
         const firstMessage = currentBuffer.messages[0];
         const prefixMatch = firstMessage.match(/^(当前日期时间：.*?用户消息：)/);
-        
         if (prefixMatch) {
           const prefix = prefixMatch[1];
-          // 从所有消息中提取用户消息部分
           const userMessages = currentBuffer.messages.map(msg => {
             const userContentMatch = msg.match(/用户消息：(.*)$/);
             return userContentMatch ? userContentMatch[1] : msg;
           });
           combinedPrompt = prefix + userMessages.join(' ');
         } else {
-          // 如果无法匹配前缀，回退到原来的合并方式
           combinedPrompt = currentBuffer.messages.join(' ');
         }
       }
       logger.info(`[ChatGPT Debug] 定时器触发，开始调用API, 合并后消息: '${combinedPrompt}'`);
 
-      // 为这个请求生成一个唯一的ID，用于防止重复处理
-      const requestId = Date.now().toString();
-      pendingRequests.set(conversationKey, requestId);
-      // logger.info(`[ChatGPT Debug] 为对话键 ${conversationKey} 生成新的请求 ID: ${requestId}`);
+      // 为这个请求生成一个唯一的ID
+      const requestId = Date.now().toString() + Math.random();
       
       // 清空缓冲列表和定时器引用
       currentBuffer.messages = [];
       currentBuffer.timer = null;
       
-      // 调用核心聊天处理函数
+      // 调用核心聊天处理函数，传入 requestId
       await this.abstractChat(currentBuffer.e, combinedPrompt, currentBuffer.use, currentBuffer.forcePictureMode, requestId);
     }, waitTime); // 使用计算出的等待时间
     // 提前返回 false，因为回复将由定时器异步发送
@@ -1005,32 +1015,25 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
     } else {
       conversationKey = `private_${e.sender.user_id}`;
     }
+
+    // 创建一个新的 AbortController 用于本次请求
+    const controller = new AbortController();
+
+    // 检查这个请求是否仍然是最新的，如果不是，直接中止
+    const lastRequestId = pendingRequests.get(conversationKey)?.requestId;
+    if (lastRequestId && lastRequestId !== requestId) {
+      logger.info(`[ChatGPT] 请求 ${requestId} 在执行前就已过时，将被忽略。`);
+      return;
+    }
+    // 将控制器与请求ID一起存储
+    pendingRequests.set(conversationKey, { controller, requestId });
+
+    interruptionFlags.set(conversationKey, false);
+
     let previousConversation, conversation, key; // 变量声明提前
 
-    // ==================== 请求有效性检查 ====================
-    // 在开始处理前，检查这个请求是否仍然是最新的
-    if (requestId && pendingRequests.get(conversationKey) !== requestId) {
-      logger.info(`[ChatGPT] 请求 ${requestId} 已过时，新的请求正在处理中。此请求将被忽略。`);
-      return; // 忽略这个过时的请求
-    }
-    
-    interruptionFlags.set(conversationKey, false); // 重置中断标志
-
-    // ==================== 对话模型与上下文管理 ====================
-    // let previousConversation  // 之前的对话记录
-    // let conversation = {}      // 当前对话对象
-    // let key                    // Redis中存储对话的键名
-
-    // if (use === 'api3') {
-    //   // API3模式：所有对话共享一个上下文管理器
-    //   let manager = new ConversationManager(e)
-    //   let conv = await manager.getConversation(e)
-    //   conversation = conv.conversation
-    //   key = conv.key
-    //   previousConversation = conv.previousConversation
-    // } else {
-      // ==================== 其他AI模型的对话管理 ====================
-      // 非API3模式：每种AI模型使用独立的Redis键名存储对话
+    try {
+      // ==================== 对话模型与上下文管理 ====================
       switch (use) {
         case 'gemini': {
           // Google Gemini模型的对话键名
@@ -1039,241 +1042,150 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
         }
       }
       
-      // ==================== 对话记录的初始化和恢复 ====================
-      let ctime = new Date()  // 当前时间作为创建/更新时间
-      
-      // 尝试从Redis中恢复之前的对话记录
+      let ctime = new Date()
       previousConversation = (key ? await redis.get(key) : null) || JSON.stringify({
-        sender: e.sender,       // 发送者信息（昵称、用户ID等）
-        ctime,                  // 对话创建时间
-        utime: ctime,          // 最后更新时间
-        num: 0,                // 对话轮数计数器
-        messages: [{           // 消息历史数组
-          role: 'system',      // 系统角色
-          content: 'You are an AI assistant that helps people find information.'  // 默认系统提示
+        sender: e.sender,
+        ctime,
+        utime: ctime,
+        num: 0,
+        messages: [{
+          role: 'system',
+          content: 'You are an AI assistant that helps people find information.'
         }],
-        conversation: {}       // 对话状态对象（存储各种模型特定的状态信息）
+        conversation: {}
       })
-      
-      // 解析JSON字符串为对象
       previousConversation = JSON.parse(previousConversation)
-      
       if (Config.debug) {
         logger.info({ previousConversation })
       }
-      
-      // ==================== 构造当前对话上下文 ====================
-      // 从之前的对话记录中提取必要的状态信息
       conversation = {
-        messages: previousConversation.messages,                           // 消息历史
-        conversationId: previousConversation.conversation?.conversationId, // 对话ID
-        parentMessageId: previousConversation.parentMessageId,             // 父消息ID
-        clientId: previousConversation.clientId,                          // 客户端ID（Bing专用）
-        invocationId: previousConversation.invocationId,                  // 调用ID（Bing专用）
-        conversationSignature: previousConversation.conversationSignature, // 对话签名（Bing专用）
-        bingToken: previousConversation.bingToken                         // Bing令牌
-      }
-    // }
-
-    // ==================== 语音消息处理（Gemini专用） ====================
-    // 这段逻辑必须在conversation对象初始化之后
-    if (use === 'gemini') {
-      const audioMatch = prompt.match(/\[\[AUDIO_URL=(.*?)\]\]/);
-      if (audioMatch && audioMatch[1]) {
-        const audioUrl = audioMatch[1];
-        prompt = prompt.replace(/\[\[AUDIO_URL=.*?\]\]/g, '').trim(); // 从prompt中移除语音URL标记
-        logger.info(`[ChatGPT Gemini] 检测到语音消息，URL: ${audioUrl}`);
-        conversation.audioUrl = audioUrl; // 将audioUrl附加到conversation对象
+        messages: previousConversation.messages,
+        conversationId: previousConversation.conversation?.conversationId,
+        parentMessageId: previousConversation.parentMessageId,
+        clientId: previousConversation.clientId,
+        invocationId: previousConversation.invocationId,
+        conversationSignature: previousConversation.conversationSignature,
+        bingToken: previousConversation.bingToken
       }
 
-      // 新增：处理图片URL
-      const imageMatch = prompt.match(/\[\[IMAGE_URL=(.*?)\]\]/);
-      if (imageMatch && imageMatch[1]) {
-        const imageUrl = imageMatch[1];
-        prompt = prompt.replace(/\[\[IMAGE_URL=.*?\]\]/g, '').trim(); // 从prompt中移除图片URL标记
-        logger.info(`[ChatGPT Gemini] 检测到图片消息，URL: ${imageUrl}`);
-        conversation.imageUrl = imageUrl; // 将imageUrl附加到conversation对象
+      if (use === 'gemini') {
+        const audioMatch = prompt.match(/\[\[AUDIO_URL=(.*?)\]\]/);
+        if (audioMatch && audioMatch[1]) {
+          const audioUrl = audioMatch[1];
+          prompt = prompt.replace(/\[\[AUDIO_URL=.*?\]\]/g, '').trim();
+          logger.info(`[ChatGPT Gemini] 检测到语音消息，URL: ${audioUrl}`);
+          conversation.audioUrl = audioUrl;
+        }
+        const imageMatch = prompt.match(/\[\[IMAGE_URL=(.*?)\]\]/);
+        if (imageMatch && imageMatch[1]) {
+          const imageUrl = imageMatch[1];
+          prompt = prompt.replace(/\[\[IMAGE_URL=.*?\]\]/g, '').trim();
+          logger.info(`[ChatGPT Gemini] 检测到图片消息，URL: ${imageUrl}`);
+          conversation.imageUrl = imageUrl;
+        }
       }
-    }
-    
-    // ==================== 获取运行时处理器 ====================
-    // 运行时处理器用于扩展功能，如按钮、后处理等
-    let handler = this.e.runtime?.handler || {
-      has: (arg1) => false  // 默认的空处理器，所有功能检查都返回false
-    }
+      
+      let handler = this.e.runtime?.handler || { has: (arg1) => false }
 
-    try {
-      // 新增：标记prompt正在处理
+      // 标记prompt正在处理
       processingPrompts.set(conversationKey, prompt);
 
-      if (Config.debug) {
-        // 调试模式下可以记录对话状态（当前已注释）
-        // logger.mark({ conversation })
-      }
-      
-      // ==================== 调用AI核心处理模块 ====================
-      // 这是整个插件的核心：将用户输入发送给AI并获取回复
-      
       // 记录API调用
       recordApiCall(e.sender.user_id);
       
-      let chatMessage = await Core.sendMessage.bind(this)(prompt, conversation, use, e)
+      // ==================== 调用AI核心处理模块，并传入 Abort Signal ====================
+      let chatMessage = await Core.sendMessage.bind(this)(prompt, conversation, use, e, controller.signal)
 
-      // 新增：检查API调用返回后，是否已经被新消息打断并合并
-      if (!processingPrompts.has(conversationKey)) {
+      // 检查API调用返回后，是否已经被新消息打断并合并
+      if (processingPrompts.get(conversationKey) !== prompt) {
         logger.info(`[ChatGPT] API调用返回，但prompt已被新消息合并处理，本次结果作废。`);
-        return; // 直接返回，不处理本次结果
-      } else {
-        // 如果没有被打断，正常清理标记
-        processingPrompts.delete(conversationKey);
+        return;
       }
 
-      // ==================== 处理AI回复为空的情况 ====================
       if (chatMessage?.noMsg) {
-        return false  // AI明确表示不需要回复
+        return false
       }
 
-        // 保存对话ID到对话记录中
-        previousConversation.conversation = {
-          conversationId: chatMessage.conversationId
-        }
-        
-        if (use === 'bing' && !chatMessage.error) {
-          // ==================== Bing模式的特殊状态管理 ====================
-          // Bing聊天需要维护额外的状态信息来保持对话连续性
-          previousConversation.clientId = chatMessage.clientId                     // 客户端ID
-          previousConversation.invocationId = chatMessage.invocationId             // 调用ID
-          previousConversation.parentMessageId = chatMessage.parentMessageId       // 父消息ID
-          previousConversation.conversationSignature = chatMessage.conversationSignature  // 对话签名
-          previousConversation.bingToken = ''  // 重置Bing令牌
-        } else if (chatMessage.id) {
-          // ==================== 其他模式的消息ID管理 ====================
-          // 大多数AI模型使用简单的消息ID来维护对话链
-          previousConversation.parentMessageId = chatMessage.id
-        } else if (chatMessage.message) {
-          // ==================== 基于消息历史的对话管理 ====================
-          // 某些模型通过维护完整的消息历史来保持上下文
-          
-          // 限制消息历史长度，避免上下文过长影响性能
-          if (previousConversation.messages.length > 10) {
-            previousConversation.messages.shift()  // 移除最旧的消息
-          }
-          // 添加新的消息到历史记录
-          previousConversation.messages.push(chatMessage.message)
-        }
-        
-        if (Config.debug) {
-          // 调试模式下记录AI回复信息（当前已注释）
-          // logger.info(chatMessage)
-        }
-        
-        // ==================== 保存对话状态到Redis ====================
-        if (!chatMessage.error) {
-          // 只有在没有错误的时候才更新对话记录，避免错误状态污染对话历史
-          previousConversation.num = previousConversation.num + 1  // 增加对话轮数
-          
-          // 根据配置决定是否设置过期时间
-          const saveOptions = Config.conversationPreserveTime > 0 
-            ? { EX: Config.conversationPreserveTime }  // 设置过期时间（秒）
-            : {}  // 永不过期
-            
-          await redis.set(key, JSON.stringify(previousConversation), saveOptions)
-        }
-      // }
+      previousConversation.conversation = {
+        conversationId: chatMessage.conversationId
+      }
       
-      // ==================== AI回复内容预处理 ====================
-      let response = chatMessage?.text?.replace('\n\n\n', '\n')  // 清理多余的换行符
+      if (use === 'bing' && !chatMessage.error) {
+        previousConversation.clientId = chatMessage.clientId
+        previousConversation.invocationId = chatMessage.invocationId
+        previousConversation.parentMessageId = chatMessage.parentMessageId
+        previousConversation.conversationSignature = chatMessage.conversationSignature
+        previousConversation.bingToken = ''
+      } else if (chatMessage.id) {
+        previousConversation.parentMessageId = chatMessage.id
+      } else if (chatMessage.message) {
+        if (previousConversation.messages.length > 10) {
+          previousConversation.messages.shift()
+        }
+        previousConversation.messages.push(chatMessage.message)
+      }
       
-      // ==================== 应用后处理器 ====================
-      // 后处理器可以对AI回复进行各种转换和优化
+      if (!chatMessage.error) {
+        previousConversation.num = previousConversation.num + 1
+        const saveOptions = Config.conversationPreserveTime > 0 
+          ? { EX: Config.conversationPreserveTime }
+          : {}
+        await redis.set(key, JSON.stringify(previousConversation), saveOptions)
+      }
+      
+      let response = chatMessage?.text?.replace('\n\n\n', '\n')
+      
       let postProcessors = await collectProcessors('post')
-      let thinking = chatMessage.thinking_text  // AI的思考过程（如果有）
+      let thinking = chatMessage.thinking_text
       
       for (let processor of postProcessors) {
         let output = await processor.processInner({
-          text: response,           // 当前的回复文本
-          thinking_text: thinking   // 思考过程文本
+          text: response,
+          thinking_text: thinking
         })
-        response = output.text          // 更新处理后的回复文本
-        thinking = output.thinking_text // 更新处理后的思考过程
+        response = output.text
+        thinking = output.thinking_text
       }
       
-      // ==================== 表情包处理逻辑 ====================
-      // 【新增/调整】表情包处理逻辑：从回复文本中提取表情图，并移除表情标记
-      // ==================== 表情符号处理功能 ====================
-      // 处理回复中的自定义表情标记 {{表情名}}，将其转换为实际的图片消息
-      const imagesToSend = [];  // 存储解析出的表情图片段对象
-      const emojiRegex = /{{(.*?)}}/g;  // 正则表达式：匹配双大括号包围的表情名称
+      const imagesToSend = [];
+      const emojiRegex = /{{(.*?)}}/g;
       let match;
-
-      // 使用临时变量进行表情解析，避免修改原始回复文本
       let tempTextForFindingEmojis = response; 
-      
-      // 循环查找所有表情标记
       while ((match = emojiRegex.exec(tempTextForFindingEmojis)) !== null) {
-        const emojiName = match[1];  // 提取表情名称
-        
-        // 构建表情图片的本地文件路径
+        const emojiName = match[1];
         let imagePath = path.join(__dirname, 'emojis', `${emojiName}.png`);
-        const fileUrlImagePath = `file://${imagePath.replace(/\\/g, '/')}`;  // 转换为文件URL格式
-        
+        const fileUrlImagePath = `file://${imagePath.replace(/\\/g, '/')}`;
         try {
-          // 创建图片消息段并添加到发送队列
           imagesToSend.push(segment.image(fileUrlImagePath));
         } catch (imgError) {
-          // 表情图片加载失败的错误处理
           logger.error(`[ChatGPT] 为 ${emojiName} 创建图片段时出错，路径为 ${fileUrlImagePath}: ${imgError}`);
         }
       }
-      
-      // ==================== 清理表情标记 ====================
-      // 从最终回复文本中移除所有表情标记，只保留纯文本内容
       response = response.replace(emojiRegex, '').trim();
 
-      // ==================== 响应后处理器调用 ====================
-      // 如果注册了响应后处理器，在发送回复前调用进行最终处理
       if (handler.has('chatgpt.response.post')) {
         logger.debug('调用后处理器: chatgpt.response.post')
         handler.call('chatgpt.response.post', this.e, {
-          content: response,    // 处理后的回复内容
-          thinking,            // AI的思考过程
-          use,                 // 使用的AI模型
-          prompt              // 用户的原始输入
+          content: response,
+          thinking,
+          use,
+          prompt
         }, true).catch(err => {
           logger.error('后处理器出错', err)
         })
       }
 
-      // ==================== 表情图片发送处理 ====================
-      // 优先发送解析出的表情图片，每张图片单独发送以确保显示效果
       if (imagesToSend.length > 0) {
-        const sendImage = Math.random() < 1; // 100%概率发送图片（预留概率控制接口）
+        const sendImage = Math.random() < 1;
         if (sendImage) {
-          // ==================== 表情发送延迟控制 ====================
-          // 添加1秒延迟，避免消息发送过快导致的显示问题
-          await new Promise((resolve) => {
-            setTimeout(() => {
-              resolve();
-            }, 1000);  // 1000毫秒延迟
-          });
-          
-          // ==================== 逐个发送表情图片 ====================
-          // 遍历所有表情图片，逐个发送以确保良好的用户体验
+          await new Promise((resolve) => setTimeout(resolve, 1000));
           for (const imageSegment of imagesToSend) {
-            await this.reply(imageSegment, false); // 图片消息通常不需要引用
-            
-            // 图片间添加短暂延迟，避免发送过快
-            await new Promise((resolve) => {
-              setTimeout(() => {
-                resolve();
-              }, 500); // 500毫秒的图片间隔延迟
-            });
+            await this.reply(imageSegment, false);
+            await new Promise((resolve) => setTimeout(resolve, 500));
           }
         }
       }
 
-      // ==================== Bing建议回复处理 ====================
-      // 如果是Bing模式且返回了建议回复，生成并发送建议回复按钮
       if (use === 'bing' && !chatMessage.error && Config.suggestedResponses && chatMessage?.details?.suggestedResponses?.length > 0) {
         let suggested = await generateSuggestedResponse(chatMessage.details.suggestedResponses)
         if (suggested) {
@@ -1281,40 +1193,30 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
         }
       }
 
-      // ==================== 回复内容验证和情绪处理准备 ====================
-      let mood = 'blandness'  // 默认情绪：平淡
+      let mood = 'blandness'
       
-      // 验证是否有有效的回复内容
       if (!response) {
         await this.reply('没有任何回复', true)
         return
       }
       
-      // ==================== 回复内容屏蔽词检查 ====================
-      // 检查AI回复是否包含配置的屏蔽词
       const blockWord = Config.blockWords.find(word => response.toLowerCase().includes(word.toLowerCase()))
       if (blockWord) {
         await this.reply('返回内容存在敏感词，我不想回答你', true)
         return false
       }
       
-      // ==================== 代码块完整性修复 ====================
-      // 处理AI回复中被中断的代码区域，确保代码块标记完整
-      const codeBlockCount = (response.match(/```/g) || []).length  // 统计代码块标记数量
-      const shouldAddClosingBlock = codeBlockCount % 2 === 1 && !response.endsWith('```')  // 判断是否需要补充结束标记
-      
+      const codeBlockCount = (response.match(/```/g) || []).length
+      const shouldAddClosingBlock = codeBlockCount % 2 === 1 && !response.endsWith('```')
       if (shouldAddClosingBlock) {
-        response += '\n```'  // 添加缺失的代码块结束标记
+        response += '\n```'
       }
       if (codeBlockCount && !shouldAddClosingBlock) {
-        // 确保代码块结束标记前有换行符
         response = response.replace(/```$/, '\n```')
       }
       
-      // ==================== 处理引用消息 ====================
-      let quotemessage = []  // 存储有效的引用消息
+      let quotemessage = []
       if (chatMessage?.quote) {
-        // 过滤空的引用消息
         chatMessage.quote.forEach(function (item, index) {
           if (item.text && item.text.trim() !== '') {
             quotemessage.push(item)
@@ -1322,292 +1224,199 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
         })
       }
       
-      // ==================== 处理回复中的图片链接 ====================
       const regex = /\b((?:https?|ftp|file):\/\/[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|])/g
-      let responseUrls = response.match(regex)  // 提取所有URL
-      let imgUrls = []  // 存储图片URL
-      
+      let responseUrls = response.match(regex)
+      let imgUrls = []
       if (responseUrls) {
-        // 检查每个URL是否为图片
         let images = await Promise.all(responseUrls.map(link => isImage(link)))
-        imgUrls = responseUrls.filter((link, index) => images[index])  // 筛选出图片URL
+        imgUrls = responseUrls.filter((link, index) => images[index])
       }
-      
-      // 添加引用消息中的图片链接
       for (let quote of quotemessage) {
         if (quote.imageLink) imgUrls.push(quote.imageLink)
       }
 
-      // ==================== 定时消息处理 ====================
-      // 处理 [[定时 YY/MM/DD HH:MM:SS xxxxxx yyyyyy]] 标记并调度定时消息
-      // 格式说明：日期时间 + QQ号 + 定时事项内容
       const scheduleRegex = /\[\[定时\s*(\d{4}\/\d{1,2}\/\d{1,2}\s*\d{2}:\d{2}:\d{2})\s*(\d+)\s*(.*?)\]\]/
       const scheduleMatch = response.match(scheduleRegex)
-      
       if (scheduleMatch) {
-        let [fullMatch, dateTimeStr, targetQQ, content] = scheduleMatch  // 解构匹配结果
-        
-        // ==================== 处理targetQQ占位符 ====================
-        // 如果AI生成的是占位符或无效QQ号，则替换为实际的用户QQ号
+        let [fullMatch, dateTimeStr, targetQQ, content] = scheduleMatch
         if (!targetQQ || 
             targetQQ.toLowerCase().includes('userqq') || 
             targetQQ.toLowerCase().includes('user') ||
             isNaN(parseInt(targetQQ)) || 
             parseInt(targetQQ) <= 0) {
-          targetQQ = e.sender.user_id.toString()  // 使用当前用户的QQ号
+          targetQQ = e.sender.user_id.toString()
           logger.info(`[定时调试] 检测到占位符或无效QQ号，已替换为实际用户QQ: ${targetQQ}`)
         }
         
-        const targetTime = moment(dateTimeStr, 'YYYY/MM/DD HH:mm:ss')  // 解析目标时间
-        const currentTime = moment()  // 当前时间
-        const delay = targetTime.diff(currentTime)  // 计算延迟时间（毫秒）
-
+        const targetTime = moment(dateTimeStr, 'YYYY/MM/DD HH:mm:ss')
+        const currentTime = moment()
+        const delay = targetTime.diff(currentTime)
         logger.info(`[定时调试] 时间字符串: ${dateTimeStr}, 目标时间: ${targetTime.toISOString()}, 当前时间: ${currentTime.toISOString()}, 延迟: ${delay}ms`)
 
         if (delay > 0) {
-          // 延迟时间有效，设置定时任务
-          const botInstance = e.bot; // 捕获机器人实例
-          const chatgptInstance = this; // 捕获插件实例
-          const originalE = e; // 捕获原始事件对象
-          
+          const botInstance = e.bot;
+          const chatgptInstance = this;
+          const originalE = e;
           setTimeout(async (bot) => {
             try {
-              // 构造定时消息的虚拟事件对象
-              const dummyE = {
-                sender: { user_id: targetQQ },  // 目标用户
-                isPrivate: true,                // 私聊模式
-                bot: bot,                       // 机器人实例
-                self_id: originalE.self_id      // 机器人自身ID
-              };
-              
-              // 构造系统提示，让AI生成合适的提醒内容
+              const dummyE = { sender: { user_id: targetQQ }, isPrivate: true, bot: bot, self_id: originalE.self_id };
               const systemPrompt = `【system】:定时提示触发，请根据上下文和提示内容"${content}"给出提示语句以提醒对方做什么事情。`;
-              
-              // 动态确定定时消息使用的模型，与主程序保持一致
               const userData = await getUserData(targetQQ);
               const useModel = (userData.mode === 'default' ? null : userData.mode) || await redis.get('CHATGPT:USE') || 'api';
-
-              // 直接调用 abstractChat 方法处理定时消息，复用所有现有逻辑
               await chatgptInstance.abstractChat(dummyE, systemPrompt, useModel, false, null);
               logger.info(`[定时消息][成功] 已向 ${targetQQ} 触发定时提醒处理：${content}`);
             } catch (error) {
-              // 定时消息发送失败的错误处理
               logger.error(`[定时消息][错误] 发送定时消息失败到 ${targetQQ}：`, error);
               try {
-                // 尝试发送失败通知
                 await bot.pickFriend(targetQQ).sendMsg(`定时提醒失败：${content}`);
                 logger.info(`[定时消息][错误] 已向 ${targetQQ} 发送定时提醒失败通知。`);
               } catch (replyError) {
                 logger.error(`[定时消息][错误] 告知定时提醒失败也失败了：`, replyError);
               }
             }
-          }, delay, botInstance);  // 设置定时器
-          
-          // 向用户确认定时任务设置成功
+          }, delay, botInstance);
           await this.reply(`好的~`, true);
           logger.info(`[定时设置] 成功设置定时任务：${dateTimeStr}，目标QQ：${targetQQ}，内容：${content}，延迟：${delay}毫秒。`);
-          response = response.replace(fullMatch, '').trim(); // 从回复中移除定时标记
+          response = response.replace(fullMatch, '').trim();
         } else {
-          // 延迟时间无效（时间已过）
           await this.reply(`[定时提醒][失败] 定时时间已过，无法设置定时提醒。请检查时间格式并确保时间在未来。您输入的标记为：${fullMatch}`, true);
           logger.warn(`[定时设置][失败] 定时时间已过，无法设置定时任务。标记：${fullMatch}，计算延迟：${delay}毫秒。`);
-          response = response.replace(fullMatch, '').trim(); // 即使失败也移除标记
+          response = response.replace(fullMatch, '').trim();
         }
       }
 
-      // ==================== 戳一戳功能处理 ====================
-      // 新增：处理 [[戳一戳]] 标记并发送戳一戳动作
       if (response.includes('[[戳一戳]]')) {
-        response = response.replace('[[戳一戳]]', '').trim() // 移除标记
+        response = response.replace('[[戳一戳]]', '').trim()
         try {
-          if (e.poke) {
-            await e.poke() // 发送戳一戳动作
-          } else {
-            logger.warn('当前环境不支持发送戳一戳动作。')
-          }
-        } catch (error) {
-          logger.error('发送戳一戳失败：', error)
-        }
+          if (e.poke) { await e.poke() } else { logger.warn('当前环境不支持发送戳一戳动作。') }
+        } catch (error) { logger.error('发送戳一戳失败：', error) }
       }
 
-      // ==================== 语音回复功能处理 ====================
-      // 新增：处理 [[语音]] 标记并发送语音回复
       if (response.includes('[[语音]]')) {
-        response = response.replace('[[语音]]', '').trim() // 移除标记
+        response = response.replace('[[语音]]', '').trim()
         try {
-          // 动态导入语音合成模块
           const { synthesizeAudio } = await import('./audio.js')
-          
-          // 合成语音文件
           const audioFilePath = await synthesizeAudio(response)
           if (audioFilePath) {
-            // 发送语音和文本（双重保险）
             await this.reply(segment.record(audioFilePath))
             await this.reply(response, e.isGroup) 
-          } else {
-            await this.reply('语音合成失败，请检查日志。', true)
-          }
+          } else { await this.reply('语音合成失败，请检查日志。', true) }
         } catch (error) {
           logger.error('语音合成或发送失败：', error)
           await this.reply('语音合成或发送失败，请检查日志。', true)
         }
-        return // 执行完语音回复后立即返回，不执行后续逻辑
-      }
-      // ==================== 语音回复功能处理2 ====================
-      // 新增：处理 [[语音2]] 标记并发送语音回复
-      if (response.includes('[[语音2]]')) {
-        response = response.replace('[[语音2]]', '').trim() // 移除标记
-          const { FishGenerateAudio } = await import('./fish.js')
-          await FishGenerateAudio(e,response)
-          await this.reply(response, e.isGroup) 
-        return // 执行完语音回复后立即返回，不执行后续逻辑
+        return
       }
       
-      // ==================== 空回复处理 ====================
-      // 新增：处理 [[empty]] 标记，表示不需要回复
+      if (response.includes('[[语音2]]')) {
+        response = response.replace('[[语音2]]', '').trim()
+        const { FishGenerateAudio } = await import('./fish.js')
+        await FishGenerateAudio(e,response)
+        await this.reply(response, e.isGroup) 
+        return
+      }
+      
       if (response.includes('[[empty]]')) {
         logger.warn('收到[[empty]]标记，跳过回复')
-        return // 不执行后续的文本或图片发送逻辑
+        return
       }
 
-      // // ==================== 普通文本模式回复处理 ====================
-      // } else {
-        // 缓存对话数据用于后续检索和历史记录
-        this.cacheContent(e, use, response, prompt, quotemessage, mood, chatMessage.suggestedResponses, imgUrls)
-        
-        // // ==================== Bing特定错误处理 ====================
-        // if (response === 'Thanks for this conversation! I\'ve reached my limit, will you hit "New topic," please?') {
-        //   this.reply('当前对话超过上限，已重置对话', false, { at: true })
-        //   await redis.del(`CHATGPT:CONVERSATIONS_BING:${e.sender.user_id}`)  // 清除Bing会话缓存
-        //   return false
-        // } else if (response === 'Throttled: Request is throttled.') {
-        //   this.reply('今日对话已达上限')
-        //   return false
-        // }
-        
-        // ==================== 智能文本分段发送 ====================
-        // 将回复按照合理的分割点分段发送，提升用户体验
-        let texts = customSplitRegex(
-          response, 
-          e.isPrivate ? /\n\n/g : /(?<!\?)[。？\n](?!\?)/, // 私聊双换行分割，群聊句号/问号/换行分割
-          e.isPrivate ? Infinity : 3  // 私聊无分段限制，群聊最多3段
-        )
-        
-        // 逐段处理和发送文本
-        for (let originalSegmentT of texts) {
-          // 检查中断标志
-          if (interruptionFlags.get(conversationKey)) {
-            logger.info(`[ChatGPT] 对话 ${prompt} 的消息输出被中断。`);
-            break; // 停止发送剩余分段
-          }
-          
-          // 跳过空分段
-          if (!originalSegmentT) {
-            continue
-          }
-          
-          originalSegmentT = originalSegmentT.trim()  // 清理首尾空白
-          
-          // ==================== 表情符号和@机器人处理 ====================
-          let textMsgArray = await convertFaces(originalSegmentT, Config.enableRobotAt, e);
-          textMsgArray = textMsgArray.map(filterResponseChunk).filter(i => !!i);  // 过滤处理结果
-          
-          // 发送消息（包含按钮数据）
-          if (textMsgArray.length > 0) {
-            await this.reply(textMsgArray, e.isGroup, {
-              btnData: {
-                use,  // 当前使用的AI模型
-                suggested: chatMessage.suggestedResponses  // 建议回复数据
-              }
-            });
-            
-            // ==================== 消息间隔控制 ====================
-            // 根据文本长度动态调整发送间隔
-            await new Promise((resolve) => {
-              setTimeout(() => {
-                resolve();
-              }, Math.min(originalSegmentT.length * 200, 3000)); // 200ms/字符，最长3秒
-            });
-          }
-        }
-        
-        // ==================== 引用消息处理 ====================
-        // 发送引用消息的转发卡片
-        if (quotemessage.length > 0 && !interruptionFlags.get(conversationKey)) {
-          this.reply(await makeForwardMsg(this.e, quotemessage.map(msg => `${msg.text} - ${msg.url}`)))
-        }
-        
-        // ==================== 建议回复生成与显示 ====================
-        // 如果启用了建议回复功能且当前没有建议回复，尝试生成
-        if (chatMessage?.conversation && Config.enableSuggestedResponses && !chatMessage.suggestedResponses && Config.apiKey && !interruptionFlags.get(conversationKey)) {
-          try {
-            chatMessage.suggestedResponses = await generateSuggestedResponse(chatMessage.conversation)
-          } catch (err) {
-            logger.debug('生成建议回复失败', err)
-          }
-        }
-        
-        // ==================== 思考过程显示 ====================
-        // 如果AI返回了思考过程，根据配置选择显示方式
-        if (thinking && !interruptionFlags.get(conversationKey)) {
-          if (Config.forwardReasoning) {
-            // 转发消息模式显示思考过程
-            let thinkingForward = await common.makeForwardMsg(e, [thinking], '思考过程')
-            this.reply(thinkingForward)  // 发送思考过程转发消息
-          } else {
-            // 日志模式显示思考过程
-            logger.mark('思考过程', thinking)
-          }
-        }
-
-        // ==================== 最终建议回复显示 ====================
-        // 在所有消息发送完成后，显示AI建议的回复选项
-        if (Config.enableSuggestedResponses && chatMessage.suggestedResponses && !interruptionFlags.get(conversationKey)) {
-          this.reply(`建议的回复：\n${chatMessage.suggestedResponses}`)
-        }
-      // }
+      this.cacheContent(e, use, response, prompt, quotemessage, mood, chatMessage.suggestedResponses, imgUrls)
       
-    // ==================== 异常处理机制 ====================
+      let texts = customSplitRegex(
+        response, 
+        e.isPrivate ? /\n\n/g : /(?<!\?)[。？\n](?!\?)/,
+        e.isPrivate ? Infinity : 3
+      )
+      
+      for (let originalSegmentT of texts) {
+        if (interruptionFlags.get(conversationKey)) {
+          logger.info(`[ChatGPT] 对话 ${prompt} 的消息输出被中断。`);
+          break;
+        }
+        
+        if (!originalSegmentT) { continue }
+        
+        originalSegmentT = originalSegmentT.trim()
+        
+        let textMsgArray = await convertFaces(originalSegmentT, Config.enableRobotAt, e);
+        textMsgArray = textMsgArray.map(filterResponseChunk).filter(i => !!i);
+        
+        if (textMsgArray.length > 0) {
+          await this.reply(textMsgArray, e.isGroup, {
+            btnData: { use, suggested: chatMessage.suggestedResponses }
+          });
+          
+          await new Promise((resolve) => {
+            setTimeout(() => {
+              resolve();
+            }, Math.min(originalSegmentT.length * 200, 3000));
+          });
+        }
+      }
+      
+      if (quotemessage.length > 0 && !interruptionFlags.get(conversationKey)) {
+        this.reply(await makeForwardMsg(this.e, quotemessage.map(msg => `${msg.text} - ${msg.url}`)))
+      }
+      
+      if (chatMessage?.conversation && Config.enableSuggestedResponses && !chatMessage.suggestedResponses && Config.apiKey && !interruptionFlags.get(conversationKey)) {
+        try {
+          chatMessage.suggestedResponses = await generateSuggestedResponse(chatMessage.conversation)
+        } catch (err) {
+          logger.debug('生成建议回复失败', err)
+        }
+      }
+      
+      if (thinking && !interruptionFlags.get(conversationKey)) {
+        if (Config.forwardReasoning) {
+          let thinkingForward = await common.makeForwardMsg(e, [thinking], '思考过程')
+          this.reply(thinkingForward)
+        } else {
+          logger.mark('思考过程', thinking)
+        }
+      }
+
+      if (Config.enableSuggestedResponses && chatMessage.suggestedResponses && !interruptionFlags.get(conversationKey)) {
+        this.reply(`建议的回复：\n${chatMessage.suggestedResponses}`)
+      }
+      
     } catch (err) {
-      logger.error(err)  // 记录详细错误信息
-      
-      // 新增：在catch块中也要清理标记
-      if (processingPrompts.has(conversationKey)) {
-        processingPrompts.delete(conversationKey);
+      // 捕获并处理中止错误
+      if (err.name === 'AbortError') {
+        logger.info(`[ChatGPT] API请求 ${requestId} 被成功中止。`);
+        // 被中止是预期行为，不需要向用户报告错误，直接返回即可
+        return;
       }
       
-      // // ==================== API3队列清理 ====================
-      // // 如果是API3模式出现异常，需要清理队列腾出位置
-      // if (use === 'api3') {
-      //   await redis.lPop('CHATGPT:CHAT_QUEUE', 0)
-      // }
+      logger.error(err);
       
-      // ==================== 特定错误类型处理 ====================
       if (err === 'Error: {"detail":"Conversation not found"}') {
-        // 对话不存在错误 - 清除会话并提示重试
         await this.destroyConversations(err)
         await this.reply('当前对话异常，已经清除，请重试', true, { recallMsg: e.isGroup ? 10 : 0 })
       } else {
-        // ==================== 通用错误处理 ====================
-        // 提取错误消息文本
         let errorMessage = err?.message || err?.data?.message || (typeof (err) === 'object' ? JSON.stringify(err) : err) || '未能确认错误类型！'
         
         if (errorMessage.length < 200) {
-          // 短错误消息：直接文本回复
           await this.reply(`出现错误：${errorMessage}\n请重试或联系Bot管理员`, true, { recallMsg: e.isGroup ? 10 : 0 })
         } else {
-          // 长错误消息：渲染为图片回复（避免刷屏）
           await this.renderImage(e, use, `出现异常,错误信息如下 \n \`\`\`${errorMessage}\`\`\``, prompt)
         }
       }
       
-      // ==================== 清除续接对话状态（错误情况） ====================
-      // 即使出现错误，也要清除用户的续接对话状态
-      clearUserContinuationState(conversationKey, e.sender.user_id);
+    } finally {
+      // **重要**：无论成功、失败还是中止，都清理状态
+      const currentPending = pendingRequests.get(conversationKey);
+      if (currentPending && currentPending.requestId === requestId) {
+        pendingRequests.delete(conversationKey);
+      }
+      
+      // 只有当 prompt 仍然是当前正在处理的 prompt 时才删除，防止错误地删除新合并的 prompt 标记
+      if (processingPrompts.get(conversationKey) === prompt) {
+        processingPrompts.delete(conversationKey);
+      }
     }
     
-    // ==================== 清除续接对话状态 ====================
-    // AI响应完成后，清除用户的续接对话状态，要求下次必须重新使用关键词或@触发
+    // AI响应完成后，清除用户的续接对话状态
     clearUserContinuationState(conversationKey, e.sender.user_id);
   }
 
