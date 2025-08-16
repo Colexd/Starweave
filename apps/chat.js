@@ -943,9 +943,9 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
     prompt.includes('什么')||prompt.includes('怎么')||prompt.includes('如何')||prompt.includes('为什么')) {
         waitTime = 4000; // 结尾是疑问词时等待4秒
         logger.info(`[ChatGPT Debug] 检测到用户输入以"?"结尾或包含"吗"，等待时间4秒`);
-    }else if(prompt.includes('...')||prompt.includes('。')){
+    }else if(prompt.includes('...')||prompt.includes('。')||prompt.includes('：')){
       waitTime = 12000; // 包含省略号或句号时等待12秒
-      logger.info(`[ChatGPT Debug] 检测到用户输入"..."，等待时间12秒`);
+      logger.info(`[ChatGPT Debug] 检测到用户输入"等待符"，等待时间12秒`);
     }
 
     // ==================== 设置定时器处理缓冲消息 ====================
