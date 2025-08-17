@@ -45,6 +45,14 @@ const userContinuationStates = new Map();//用户续接对话状态 - 跟踪最�
 const processingPrompts = new Map(); // 新增：存储正在调用API的prompt
 const pendingConfirmations = new Map(); // 用于销毁对话前的确认
 
+// ==================== 关键词触发配置 ====================
+// 当消息包含这些关键词时，会像被@一样触发AI回复
+// 您可以根据需要修改、添加或删除关键词
+const TRIGGER_KEYWORDS = [
+  '小绘小绘',        // 基础触发词
+  '星小绘bot'
+];
+
 // ==================== API调用日志管理 ====================
 function getApiLogFileName() {
   const today = moment().format('YYYY-MM-DD');
@@ -100,19 +108,11 @@ function recordApiCall(userId) {
   }
 }
 // ==================== 全局配置变量 ====================
-let version = Config.version // 插件版本号
 let proxy = getProxy()       // 代理配置
-// ==================== 关键词触发配置 ====================
-// 当消息包含这些关键词时，会像被@一样触发AI回复
-// 您可以根据需要修改、添加或删除关键词
-const TRIGGER_KEYWORDS = [
-  '小绘小绘',        // 基础触发词
-  '星小绘bot'
-];
 
 // ==================== 续接对话配置 ====================
 // 用户在触发关键词或被@后，可以续接对话的时间窗口（毫秒）
-const CONTINUATION_TIMEOUT = 1 * 20 * 1000; // 0.33分钟
+const CONTINUATION_TIMEOUT = 1 * 30 * 1000; // 0.5分钟
 
 /**
  * 设置用户续接对话状态
@@ -751,7 +751,7 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
       
       // 修改条件：艾特机器人、包含触发关键词、可以续接对话、或在私聊中发语音
       if (e.isGroup && !e.atme && !e.atBot && !containsTriggerKeyword && !canContinue) {
-        logger.info(`[ChatGPT] 群聊中未满足任何触发条件，忽略消息。用户ID: ${e.user_id}`)
+        logger.info(`[ChatGPT] 群聊未满足任何触发条件，忽略消息。`)
         return false; // 在群聊中，必须满足以上至少一个条件
       }
       

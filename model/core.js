@@ -1,23 +1,23 @@
 import { Config, defaultOpenAIAPI } from '../utils/config.js'
 import {
-  extractContentFromFile,
+  // extractContentFromFile,
   formatDate,
   getImg,
   getMasterQQ, getMaxModelTokens,
   getUin,
   getUserData,
-  isCN
+  // isCN
 } from '../utils/common.js'
-import { KeyvFile } from 'keyv-file'
-import SydneyAIClient from '../utils/SydneyAIClient.js'
+// import { KeyvFile } from 'keyv-file'
+// import SydneyAIClient from '../utils/SydneyAIClient.js'
 import { getChatHistoryGroup } from '../utils/chat.js'
 import { APTool } from '../utils/tools/APTool.js'
-import { OfficialChatGPTClient } from '../utils/message.js'
-import { ClaudeAPIClient } from '../client/ClaudeAPIClient.js'
-import { ClaudeAIClient } from '../utils/claude.ai/index.js'
-import XinghuoClient from '../utils/xinghuo/xinghuo.js'
-import { getMessageById, upsertMessage } from '../utils/history.js'
-import { v4 as uuid } from 'uuid'
+// import { OfficialChatGPTClient } from '../utils/message.js'
+// import { ClaudeAPIClient } from '../client/ClaudeAPIClient.js'
+// import { ClaudeAIClient } from '../utils/claude.ai/index.js'
+// import XinghuoClient from '../utils/xinghuo/xinghuo.js'
+// import { getMessageById, upsertMessage } from '../utils/history.js'
+// import { v4 as uuid } from 'uuid'
 import fetch from 'node-fetch'
 import { CustomGoogleGeminiClient } from '../client/CustomGoogleGeminiClient.js'
 import { QueryStarRailTool } from '../utils/tools/QueryStarRailTool.js'
@@ -40,20 +40,20 @@ import { KickOutTool } from '../utils/tools/KickOutTool.js'
 import { SetTitleTool } from '../utils/tools/SetTitleTool.js'
 import { SerpIkechan8370Tool } from '../utils/tools/SerpIkechan8370Tool.js'
 import { SerpTool } from '../utils/tools/SerpTool.js'
-import common from '../../../lib/common/common.js'
+// import common from '../../../lib/common/common.js'
 import { SendDiceTool } from '../utils/tools/SendDiceTool.js'
 // import { EliMovieTool } from '../utils/tools/EliMovieTool.js'
 // import { EliMusicTool } from '../utils/tools/EliMusicTool.js'
 import { HandleMessageMsgTool } from '../utils/tools/HandleMessageMsgTool.js'
 import { ProcessPictureTool } from '../utils/tools/ProcessPictureTool.js'
 // import { ImageCaptionTool } from '../utils/tools/ImageCaptionTool.js'
-import { ChatGPTAPI } from '../utils/openai/chatgpt-api.js'
+// import { ChatGPTAPI } from '../utils/openai/chatgpt-api.js'
 import { newFetch } from '../utils/proxy.js'
-import { ChatGLM4Client } from '../client/ChatGLM4Client.js'
-import { QwenApi } from '../utils/alibaba/qwen-api.js'
-import { BingAIClient } from '../client/CopilotAIClient.js'
-import Keyv from 'keyv'
-import crypto from 'crypto'
+// import { ChatGLM4Client } from '../client/ChatGLM4Client.js'
+// import { QwenApi } from '../utils/alibaba/qwen-api.js'
+// import { BingAIClient } from '../client/CopilotAIClient.js'
+// import Keyv from 'keyv'
+// import crypto from 'crypto'
 import {GithubAPITool} from '../utils/tools/GithubTool.js'
 
 export const roleMap = {

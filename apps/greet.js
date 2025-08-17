@@ -65,7 +65,7 @@ export class Greet extends plugin {
     })
     // 真正实现单例模式
     if (Greet.instance) {
-      // console.log('[定时问候] 检测到重复实例化，将返回现有实例。');
+      // logger.info('[定时问候] 检测到重复实例化，将返回现有实例。');
       // 清理当前（重复）实例可能已经创建的定时器
       if (this.scanInterval) clearInterval(this.scanInterval);
       if (this.hourlyInterval) clearInterval(this.hourlyInterval);
@@ -75,7 +75,7 @@ export class Greet extends plugin {
 
     // 防止重复实例化
     if (Greet.instance) {
-      // console.log('[定时问候] 检测到重复实例化，清理旧实例的定时器。');
+      // logger.info('[定时问候] 检测到重复实例化，清理旧实例的定时器。');
       const oldInstance = Greet.instance;
       if (oldInstance.scanInterval) {
         clearInterval(oldInstance.scanInterval);
@@ -107,6 +107,7 @@ export class Greet extends plugin {
       （你不知道用户在做什么的情况下，这次是你主动地问候一下，而不是用户找你）。
       如果上次的消息没有被回复一定要问一下用户在做什么。
       尽量做到有感情色彩，按照多姿多彩的生活来问候。
+      请避免询问类似：“这么晚了还没休息吗？”这种无端的问题因为你不知道是不是在休息，而是询问类似“休息了吗”之类的
       如果在和用户的正常聊天的过程中触发了主动聊天，可以讲一些题外话（比如说：对了，上次xxxxxx）。`
     
     this.configFile = path.join(__dirname, 'greet_config.json') // 用户配置路径，保存在代码同目录
@@ -126,7 +127,7 @@ export class Greet extends plugin {
     this.heartbeatInterval = setInterval(() => {
       const enabledUsersCount = Object.values(this.userConfigs).filter(status => status === 'on').length;
       const waitingRecordsCount = Object.keys(this.messageWaitRecords).length;
-      console.log(`[定时问候-心跳] ${new Date().toLocaleString('zh-CN')} | 运行状态: 正常 | 开启用户数: ${enabledUsersCount} | 等待记录数: ${waitingRecordsCount} | 扫描定时器: ${this.scanInterval ? '运行中' : '未启动'} | 每小时定时器: ${this.hourlyInterval ? '运行中' : '未启动'}`);
+      logger.info(`[定时问候-心跳] ${new Date().toLocaleString('zh-CN')} | 运行状态: 正常 | 开启用户数: ${enabledUsersCount} | 等待记录数: ${waitingRecordsCount} | 扫描定时器: ${this.scanInterval ? '运行中' : '未启动'} | 每小时定时器: ${this.hourlyInterval ? '运行中' : '未启动'}`);
     }, 45000) // 每45秒执行一次
 
     // 绑定方法，确保 'this' 上下文正确
@@ -161,7 +162,7 @@ export class Greet extends plugin {
    * 初始化定时器系统
    */
   async initializeTimerSystem() {
-    console.log('[定时问候] 机器人启动 - 自动初始化定时器系统。');
+    logger.info('[定时问候] 机器人启动 - 自动初始化定时器系统。');
     
     // 立即生成本小时的问候计划
     await this.updateHourlyGreetingTime();
@@ -171,7 +172,7 @@ export class Greet extends plugin {
       await this.scanAndExecuteGreeting();
       await this.checkAndSendWaitingMessages(); // 检查消息等待状态
     }, 50000); // 每50秒执行一次
-    console.log('[定时问候] 50秒扫描定时器已启动（包含消息等待检查）。');
+    logger.info('[定时问候] 50秒扫描定时器已启动（包含消息等待检查）。');
 
     // 计算到下一个整点的时间
     const now = new Date();
@@ -182,22 +183,22 @@ export class Greet extends plugin {
     nextFullHour.setMilliseconds(0);
     const initialDelay = nextFullHour.getTime() - now.getTime();
 
-    console.log(`[定时问候] 首次每小时更新将在 ${nextFullHour.toLocaleString('zh-CN')} 进行（${Math.round(initialDelay / 1000)} 秒后）。`);
+    logger.info(`[定时问候] 首次每小时更新将在 ${nextFullHour.toLocaleString('zh-CN')} 进行（${Math.round(initialDelay / 1000)} 秒后）。`);
 
     // 设置首次每小时更新
     setTimeout(() => {
-      console.log('[定时问候] 首次每小时更新触发。');
+      logger.info('[定时问候] 首次每小时更新触发。');
       this.updateHourlyGreetingTime();
       
       // 启动每小时的定时器
       this.hourlyInterval = setInterval(async () => {
-        console.log('[定时问候] 每小时更新定时器触发。');
+        logger.info('[定时问候] 每小时更新定时器触发。');
         await this.updateHourlyGreetingTime();
       }, 3600000); // 每小时执行一次
-      console.log('[定时问候] 每小时更新定时器已启动。');
+      logger.info('[定时问候] 每小时更新定时器已启动。');
     }, initialDelay);
     
-    console.log('[定时问候] 定时器系统初始化完成。');
+    logger.info('[定时问候] 定时器系统初始化完成。');
   }
 
   /**
@@ -211,7 +212,7 @@ export class Greet extends plugin {
         
         // 检查文件内容是否有效
         if (!data || data.trim() === '') {
-          console.warn('[定时问候] 用户配置文件为空，将重新创建默认配置。')
+          logger.warn('[定时问候] 用户配置文件为空，将重新创建默认配置。')
           this.userConfigs = {}
           this.saveConfig()
           return
@@ -220,37 +221,37 @@ export class Greet extends plugin {
         // 尝试解析JSON
         try {
           this.userConfigs = JSON.parse(data)
-          console.log('[定时问候] 用户配置文件加载成功：', this.userConfigs)
+          logger.info('[定时问候] 用户配置文件加载成功：', this.userConfigs)
         } catch (parseError) {
-          console.error('[定时问候] 用户配置JSON解析失败，文件内容：', data)
-          console.error('[定时问候] 用户配置JSON解析错误详情：', parseError.message)
+          logger.error('[定时问候] 用户配置JSON解析失败，文件内容：', data)
+          logger.error('[定时问候] 用户配置JSON解析错误详情：', parseError.message)
           
           // 备份损坏的文件
           const backupFile = this.configFile + '.backup.' + Date.now()
           fs.writeFileSync(backupFile, data, 'utf8')
-          console.log(`[定时问候] 已备份损坏的用户配置文件至：${backupFile}`)
+          logger.info(`[定时问候] 已备份损坏的用户配置文件至：${backupFile}`)
           
           // 重新创建默认配置
           this.userConfigs = {}
           this.saveConfig()
-          console.log('[定时问候] 已重新创建默认用户配置。')
+          logger.info('[定时问候] 已重新创建默认用户配置。')
         }
       } else {
         // 如果配置文件不存在，创建默认配置
         this.userConfigs = {}
         this.saveConfig()
-        console.log('[定时问候] 用户配置文件不存在，已创建新的默认配置。')
+        logger.info('[定时问候] 用户配置文件不存在，已创建新的默认配置。')
       }
     } catch (error) {
-      console.error('[定时问候] 加载用户配置文件时出错：', error)
-      console.error('[定时问候] 错误堆栈：', error.stack)
+      logger.error('[定时问候] 加载用户配置文件时出错：', error)
+      logger.error('[定时问候] 错误堆栈：', error.stack)
       this.userConfigs = {}
       
       // 尝试创建默认配置
       try {
         this.saveConfig()
       } catch (saveError) {
-        console.error('[定时问候] 保存默认用户配置也失败：', saveError)
+        logger.error('[定时问候] 保存默认用户配置也失败：', saveError)
       }
     }
   }
@@ -270,13 +271,13 @@ export class Greet extends plugin {
       
       const jsonString = JSON.stringify(cleanConfigs, null, 2)
       fs.writeFileSync(this.configFile, jsonString, 'utf8')
-      console.log('[定时问候] 用户配置文件保存成功：', cleanConfigs)
+      logger.info('[定时问候] 用户配置文件保存成功：', cleanConfigs)
       
       // 更新内存中的配置
       this.userConfigs = cleanConfigs
     } catch (error) {
-      console.error('[定时问候] 保存用户配置文件时出错：', error)
-      console.error('[定时问候] 尝试保存的配置：', this.userConfigs)
+      logger.error('[定时问候] 保存用户配置文件时出错：', error)
+      logger.error('[定时问候] 尝试保存的配置：', this.userConfigs)
     }
   }
 
@@ -291,7 +292,7 @@ export class Greet extends plugin {
         
         // 检查文件内容是否有效
         if (!data || data.trim() === '') {
-          console.warn('[定时问候] 运行配置文件为空，将重新创建默认配置。')
+          logger.warn('[定时问候] 运行配置文件为空，将重新创建默认配置。')
           this.runConfig = {}
           this.saveRunConfig()
           return
@@ -301,18 +302,18 @@ export class Greet extends plugin {
         try {
           this.runConfig = JSON.parse(data)
         } catch (parseError) {
-          console.error('[定时问候] JSON解析失败，文件内容：', data)
-          console.error('[定时问候] JSON解析错误详情：', parseError.message)
+          logger.error('[定时问候] JSON解析失败，文件内容：', data)
+          logger.error('[定时问候] JSON解析错误详情：', parseError.message)
           
           // 备份损坏的文件
           const backupFile = this.runConfigFile + '.backup.' + Date.now()
           fs.writeFileSync(backupFile, data, 'utf8')
-          console.log(`[定时问候] 已备份损坏的配置文件至：${backupFile}`)
+          logger.info(`[定时问候] 已备份损坏的配置文件至：${backupFile}`)
           
           // 重新创建默认配置
           this.runConfig = {}
           this.saveRunConfig()
-          console.log('[定时问候] 已重新创建默认运行配置。')
+          logger.info('[定时问候] 已重新创建默认运行配置。')
           return
         }
         
@@ -321,25 +322,25 @@ export class Greet extends plugin {
           const timestamp = this.runConfig.timestamp || '未设置';
           const shouldSend = this.runConfig.shouldSend ? '是' : '否';
           const nextGreetingTime = this.runConfig.nextGreetingTime || '未设置';
-          console.log(`=== 定时问候 ===\n运行时间：${timestamp} | 是否发送：${shouldSend} | 下次问候：${nextGreetingTime}`)
+          logger.info(`=== 定时问候 ===\n运行时间：${timestamp} | 是否发送：${shouldSend} | 下次问候：${nextGreetingTime}`)
         }
       } else {
         this.runConfig = {}
         this.saveRunConfig()
         if (!silent) {
-          console.log('[定时问候] 运行配置文件不存在，已创建新的默认配置。')
+          logger.info('[定时问候] 运行配置文件不存在，已创建新的默认配置。')
         }
       }
     } catch (error) {
-      console.error('[定时问候] 加载运行配置文件时出错：', error)
-      console.error('[定时问候] 错误堆栈：', error.stack)
+      logger.error('[定时问候] 加载运行配置文件时出错：', error)
+      logger.error('[定时问候] 错误堆栈：', error.stack)
       this.runConfig = {}
       
       // 如果是文件系统错误，也尝试创建默认配置
       try {
         this.saveRunConfig()
       } catch (saveError) {
-        console.error('[定时问候] 保存默认配置也失败：', saveError)
+        logger.error('[定时问候] 保存默认配置也失败：', saveError)
       }
     }
   }
@@ -360,10 +361,10 @@ export class Greet extends plugin {
       
       const jsonString = JSON.stringify(cleanConfig, null, 2)
       fs.writeFileSync(this.runConfigFile, jsonString, 'utf8')
-      console.log('[定时问候] 运行配置保存成功：', cleanConfig)
+      logger.info('[定时问候] 运行配置保存成功：', cleanConfig)
     } catch (error) {
-      console.error('[定时问候] 保存运行配置文件时出错：', error)
-      console.error('[定时问候] 尝试保存的配置：', this.runConfig)
+      logger.error('[定时问候] 保存运行配置文件时出错：', error)
+      logger.error('[定时问候] 尝试保存的配置：', this.runConfig)
     }
   }
 
@@ -377,7 +378,7 @@ export class Greet extends plugin {
         
         // 检查文件内容是否有效
         if (!data || data.trim() === '') {
-          console.warn('[定时问候] 消息等待记录文件为空，将重新创建默认配置。')
+          logger.warn('[定时问候] 消息等待记录文件为空，将重新创建默认配置。')
           this.messageWaitRecords = {}
           this.saveMessageWaitRecords()
           return
@@ -386,37 +387,37 @@ export class Greet extends plugin {
         // 尝试解析JSON
         try {
           this.messageWaitRecords = JSON.parse(data)
-          // console.log('[定时问候] 消息等待记录文件加载成功，记录数量：', Object.keys(this.messageWaitRecords).length)
+          // logger.info('[定时问候] 消息等待记录文件加载成功，记录数量：', Object.keys(this.messageWaitRecords).length)
         } catch (parseError) {
-          console.error('[定时问候] 消息等待记录JSON解析失败，文件内容：', data)
-          console.error('[定时问候] 消息等待记录JSON解析错误详情：', parseError.message)
+          logger.error('[定时问候] 消息等待记录JSON解析失败，文件内容：', data)
+          logger.error('[定时问候] 消息等待记录JSON解析错误详情：', parseError.message)
           
           // 备份损坏的文件
           const backupFile = this.messageWaitFile + '.backup.' + Date.now()
           fs.writeFileSync(backupFile, data, 'utf8')
-          console.log(`[定时问候] 已备份损坏的消息等待记录文件至：${backupFile}`)
+          logger.info(`[定时问候] 已备份损坏的消息等待记录文件至：${backupFile}`)
           
           // 重新创建默认配置
           this.messageWaitRecords = {}
           this.saveMessageWaitRecords()
-          console.log('[定时问候] 已重新创建默认消息等待记录。')
+          logger.info('[定时问候] 已重新创建默认消息等待记录。')
         }
       } else {
         // 如果文件不存在，创建默认配置
         this.messageWaitRecords = {}
         this.saveMessageWaitRecords()
-        console.log('[定时问候] 消息等待记录文件不存在，已创建新的默认配置。')
+        logger.info('[定时问候] 消息等待记录文件不存在，已创建新的默认配置。')
       }
     } catch (error) {
-      console.error('[定时问候] 加载消息等待记录文件时出错：', error)
-      console.error('[定时问候] 错误堆栈：', error.stack)
+      logger.error('[定时问候] 加载消息等待记录文件时出错：', error)
+      logger.error('[定时问候] 错误堆栈：', error.stack)
       this.messageWaitRecords = {}
       
       // 尝试创建默认配置
       try {
         this.saveMessageWaitRecords()
       } catch (saveError) {
-        console.error('[定时问候] 保存默认消息等待记录也失败：', saveError)
+        logger.error('[定时问候] 保存默认消息等待记录也失败：', saveError)
       }
     }
   }
@@ -436,13 +437,13 @@ export class Greet extends plugin {
       
       const jsonString = JSON.stringify(cleanRecords, null, 2)
       fs.writeFileSync(this.messageWaitFile, jsonString, 'utf8')
-      console.log('[定时问候] 消息等待记录文件保存成功，记录数量：', Object.keys(cleanRecords).length)
+      logger.info('[定时问候] 消息等待记录文件保存成功，记录数量：', Object.keys(cleanRecords).length)
       
       // 更新内存中的记录
       this.messageWaitRecords = cleanRecords
     } catch (error) {
-      console.error('[定时问候] 保存消息等待记录文件时出错：', error)
-      console.error('[定时问候] 尝试保存的记录：', this.messageWaitRecords)
+      logger.error('[定时问候] 保存消息等待记录文件时出错：', error)
+      logger.error('[定时问候] 尝试保存的记录：', this.messageWaitRecords)
     }
   }
 
@@ -454,7 +455,7 @@ export class Greet extends plugin {
     const currentTime = this.formatToUTCPlus8(new Date())
     this.messageWaitRecords[userId] = currentTime
     this.saveMessageWaitRecords()
-    console.log(`[定时问候] 记录机器人回复时间 ${userId}: ${currentTime}，开始等待用户回复。`)
+    // logger.info(`[定时问候] 记录机器人回复时间 ${userId}: ${currentTime}，开始等待用户回复。`)
   }
 
   /**
@@ -469,7 +470,7 @@ export class Greet extends plugin {
     }
     
     const waitingUsersCount = Object.keys(this.messageWaitRecords).length
-    // console.log(`[定时问候] 开始检查消息等待状态，共 ${enabledUsers.length} 个开启用户，等待中用户数: ${waitingUsersCount}`)
+    // logger.info(`[定时问候] 开始检查消息等待状态，共 ${enabledUsers.length} 个开启用户，等待中用户数: ${waitingUsersCount}`)
     
     let processedCount = 0
     let sentCount = 0
@@ -485,12 +486,12 @@ export class Greet extends plugin {
         // 生成5-30分钟的随机等待时间
         const randomWaitMinutes = Math.floor(Math.random() * 26) + 5 // 5到30分钟的随机等待时间
         
-        console.log(`[定时问候] 用户 ${userId} 机器人最后回复时间: ${this.messageWaitRecords[userId]}, 已过 ${minutesDifference} 分钟, 等待阈值: ${randomWaitMinutes} 分钟`)
-        
-        // 增加20%的概率检测
-        if (Math.random() < 0.3) {
+        logger.info(`[定时问候] 用户 ${userId} 机器人最后回复时间: ${this.messageWaitRecords[userId]}, 已过 ${minutesDifference} 分钟, 等待阈值: ${randomWaitMinutes} 分钟`)
+
+        // 增加50%的概率检测
+        if (Math.random() < 0.5) {
           if (minutesDifference >= randomWaitMinutes) {
-            console.log(`[定时问候] 用户 ${userId} 已经 ${minutesDifference} 分钟没有回复消息，准备发送询问消息`)
+            logger.info(`[定时问候] 用户 ${userId} 已经 ${minutesDifference} 分钟没有回复消息，准备发送询问消息`)
             
             // 生成询问消息
             const currentTimeStr = now.toLocaleString('zh-CN')
@@ -499,7 +500,7 @@ export class Greet extends plugin {
             // 发送询问消息，且不记录本次发送的时间
             await this.sendActualGreeting(userId, waitingPrompt, false)
             sentCount++
-            console.log(`[定时问候] 已向用户 ${userId} 发送等待询问消息`)
+            logger.info(`[定时问候] 已向用户 ${userId} 发送等待询问消息`)
             
             // 记录日志
             this.addLogEntry({
@@ -517,7 +518,7 @@ export class Greet extends plugin {
             this.saveMessageWaitRecords()
           }
         } else {
-          console.log(`[定时问候] 用户 ${userId} 未通过20%的等待问候概率检测，本次跳过。`)
+          logger.info(`[定时问候] 用户 ${userId} 未通过20%的等待问候概率检测，本次跳过。`)
           // 即使未通过概率检测，也清除等待记录，避免循环
           delete this.messageWaitRecords[userId]
           this.saveMessageWaitRecords()
@@ -526,7 +527,7 @@ export class Greet extends plugin {
     }
     
     if (processedCount > 0) {
-      console.log(`[定时问候] 等待检查完成: 处理 ${processedCount} 个等待用户, 发送询问 ${sentCount} 个, 取消 ${cancelledCount} 个`)
+      logger.info(`[定时问候] 等待检查完成: 处理 ${processedCount} 个等待用户, 发送询问 ${sentCount} 个, 取消 ${cancelledCount} 个`)
     }
   }
 
@@ -546,10 +547,10 @@ export class Greet extends plugin {
         
         // 为取消事件添加特殊日志输出
         if (data.action === 'waitingInquiryCancelled') {
-          console.log(`[定时问候] 已取消用户 ${data.userId} 的询问问候 - 用户在等待期间回复了消息`)
+          logger.info(`[定时问候] 已取消用户 ${data.userId} 的询问问候 - 用户在等待期间回复了消息`)
         }
       } catch (error) {
-        console.error('[定时问候] 添加日志条目时出错：', error)
+        logger.error('[定时问候] 添加日志条目时出错：', error)
       }
     }
   }
@@ -569,7 +570,7 @@ export class Greet extends plugin {
     nextHour.setSeconds(0);
     nextHour.setMilliseconds(0);
     
-    console.log(`[定时问候] 生成下个小时随机时间: ${nextHour.toLocaleString('zh-CN')}`);
+    logger.info(`[定时问候] 生成下个小时随机时间: ${nextHour.toLocaleString('zh-CN')}`);
     return nextHour;
   }
 
@@ -580,7 +581,7 @@ export class Greet extends plugin {
    */
   isUserEnabled(userId) {
     const isEnabled = this.userConfigs[userId] === 'on'
-    // console.log(`[定时问候] 检查用户 ${userId} 状态：${isEnabled ? '已开启' : '未开启'}`)
+    // logger.info(`[定时问候] 检查用户 ${userId} 状态：${isEnabled ? '已开启' : '未开启'}`)
     return isEnabled
   }
 
@@ -594,13 +595,13 @@ export class Greet extends plugin {
         // 尝试从全局获取机器人实例
         if (typeof Bot !== 'undefined' && Bot.uin) {
           this.bot = Bot;
-          // console.log('[定时问候] 自动获取到机器人实例。');
+          // logger.info('[定时问候] 自动获取到机器人实例。');
         } else {
-          // console.log('[定时问候] 机器人实例未就绪，跳过扫描。');
+          // logger.info('[定时问候] 机器人实例未就绪，跳过扫描。');
           return;
         }
       } catch (error) {
-        // console.log('[定时问候] 获取机器人实例失败，跳过扫描。');
+        // logger.info('[定时问候] 获取机器人实例失败，跳过扫描。');
         return;
       }
     }
@@ -609,7 +610,7 @@ export class Greet extends plugin {
     this.loadRunConfig(true);
     
     if (!this.runConfig.shouldSend || !this.runConfig.nextGreetingTime) {
-      // console.log('[定时问候] 无问候计划或时间未设置，跳过扫描。');
+      // logger.info('[定时问候] 无问候计划或时间未设置，跳过扫描。');
       return;
     }
 
@@ -621,11 +622,11 @@ export class Greet extends plugin {
       // 防重复发送：检查是否在同一分钟内已经发送过
       const currentTimeKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`;
       if (this.lastGreetingTime === currentTimeKey) {
-        console.log(`[定时问候] 该分钟内已发送过问候，跳过重复发送。时间: ${now.toLocaleString('zh-CN')}`);
+        logger.info(`[定时问候] 该分钟内已发送过问候，跳过重复发送。时间: ${now.toLocaleString('zh-CN')}`);
         return;
       }
       
-      console.log(`[定时问候] 时间匹配！当前时间: ${now.toLocaleString('zh-CN')}, 计划时间: ${scheduledTime.toLocaleString('zh-CN')}`);
+      logger.info(`[定时问候] 时间匹配！当前时间: ${now.toLocaleString('zh-CN')}, 计划时间: ${scheduledTime.toLocaleString('zh-CN')}`);
       
       // 记录此次问候时间，防止重复
       this.lastGreetingTime = currentTimeKey;
@@ -641,7 +642,7 @@ export class Greet extends plugin {
       this.runConfig.randomMinute = nextGreetingTime.getMinutes();
       this.saveRunConfig();
       
-      console.log(`[定时问候] 已更新下次问候时间为: ${nextGreetingTime.toLocaleString('zh-CN')}`);
+      logger.info(`[定时问候] 已更新下次问候时间为: ${nextGreetingTime.toLocaleString('zh-CN')}`);
     }
   }
 
@@ -649,11 +650,11 @@ export class Greet extends plugin {
    * 向所有开启用户执行问候
    */
   async executeGreetingToAllUsers() {
-    console.log('[定时问候] 开始向所有用户发送问候。');
+    logger.info('[定时问候] 开始向所有用户发送问候。');
     
     const enabledUsers = Object.keys(this.userConfigs).filter(userId => this.userConfigs[userId] === 'on');
     if (enabledUsers.length === 0) {
-      console.log('[定时问候] 没有用户开启，跳过问候发送。');
+      logger.info('[定时问候] 没有用户开启，跳过问候发送。');
       return;
     }
 
@@ -664,7 +665,7 @@ export class Greet extends plugin {
       // 为每个用户生成个性化的问候消息
       const personalizedGreeting = await this.generateContextualGreeting(userId, currentTime);
       await this.sendActualGreeting(userId, personalizedGreeting);
-      console.log(`[定时问候] 已向用户 ${userId} 发送个性化定时问候。`);
+      logger.info(`[定时问候] 已向用户 ${userId} 发送个性化定时问候。`);
       this.addLogEntry({
         type: 'greeting',
         action: 'scheduledGreetingSent',
@@ -673,14 +674,14 @@ export class Greet extends plugin {
         sentAt: this.formatToUTCPlus8(new Date())
       });
     }
-    console.log('[定时问候] 所有用户问候发送完毕。');
+    logger.info('[定时问候] 所有用户问候发送完毕。');
   }
 
   /**
    * 每小时更新问候时间（概率判断）
    */
   async updateHourlyGreetingTime() {
-    console.log('[定时问候] === 每小时更新任务开始 ===');
+    logger.info('[定时问候] === 每小时更新任务开始 ===');
     
     const now = new Date();
     const currentHour = now.getHours();
@@ -691,19 +692,19 @@ export class Greet extends plugin {
     if (currentHour == 7 || currentHour == 22) {
       probability = 0.85;
       shouldSend = Math.random() < probability;
-      console.log(`[定时问候] 当前小时 ${currentHour} 处于 7点或22点时间段，概率 ${probability * 100}%。`);
+      logger.info(`[定时问候] 当前小时 ${currentHour} 处于 7点或22点时间段，概率 ${probability * 100}%。`);
     }
     else if (currentHour >= 8 && currentHour < 22) {
       probability = 0.20;
       shouldSend = Math.random() < probability;
-      console.log(`[定时问候] 当前小时 ${currentHour} 处于 8-22点时间段，概率 ${probability * 100}%。`);
+      logger.info(`[定时问候] 当前小时 ${currentHour} 处于 8-22点时间段，概率 ${probability * 100}%。`);
     }
     else if ((currentHour >= 23 && currentHour <= 23) || (currentHour >= 0 && currentHour < 7)) { 
       probability = 0.05;
       shouldSend = Math.random() < probability;
-      console.log(`[定时问候] 当前小时 ${currentHour} 处于 23-次日7点时间段，概率 ${probability * 100}%。`);
+      logger.info(`[定时问候] 当前小时 ${currentHour} 处于 23-次日7点时间段，概率 ${probability * 100}%。`);
     } else {
-      console.log(`[定时问候] 当前小时 ${currentHour} 不在任何预设问候时间段内，不发送问候。`);
+      logger.info(`[定时问候] 当前小时 ${currentHour} 不在任何预设问候时间段内，不发送问候。`);
       shouldSend = false;
     }
 
@@ -719,7 +720,7 @@ export class Greet extends plugin {
     // 如果计划时间已经过去，则安排到下一个小时
     if (scheduledTime.getTime() <= now.getTime()) {
       scheduledTime.setHours(currentHour + 1);
-      console.log(`[定时问候] 原定时间已过，调整到下一小时：${scheduledTime.toLocaleString('zh-CN')}`);
+      logger.info(`[定时问候] 原定时间已过，调整到下一小时：${scheduledTime.toLocaleString('zh-CN')}`);
     }
 
     // 更新运行配置
@@ -743,8 +744,8 @@ export class Greet extends plugin {
     });
 
     this.saveRunConfig();
-    console.log(`[定时问候] 本小时问候计划: ${shouldSend ? `将在 ${scheduledTime.toLocaleString('zh-CN')} 发送问候` : '不发送问候'}`);
-    console.log('[定时问候] === 每小时更新任务结束 ===');
+    logger.info(`[定时问候] 本小时问候计划: ${shouldSend ? `将在 ${scheduledTime.toLocaleString('zh-CN')} 发送问候` : '不发送问候'}`);
+    logger.info('[定时问候] === 每小时更新任务结束 ===');
   }
 
   /**
@@ -768,7 +769,7 @@ export class Greet extends plugin {
       
       if (conversationData) {
         const conversation = JSON.parse(conversationData)
-        console.log(`[定时问候] 用户 ${targetQQ} 存在对话历史，消息数: ${conversation.messages?.length || 0}`)
+        logger.info(`[定时问候] 用户 ${targetQQ} 存在对话历史，消息数: ${conversation.messages?.length || 0}`)
         
         // 获取最近的几条消息作为上下文
         const recentMessages = conversation.messages?.slice(-5) || []
@@ -789,7 +790,7 @@ export class Greet extends plugin {
           conversationAge: conversation.ctime ? new Date(conversation.ctime) : null
         }
       } else {
-        console.log(`[定时问候] 用户 ${targetQQ} 无对话历史`)
+        logger.info(`[定时问候] 用户 ${targetQQ} 无对话历史`)
         return {
           hasHistory: false,
           messageCount: 0,
@@ -800,7 +801,7 @@ export class Greet extends plugin {
         }
       }
     } catch (error) {
-      console.error(`[定时问候] 获取用户 ${targetQQ} 对话上下文失败:`, error)
+      logger.error(`[定时问候] 获取用户 ${targetQQ} 对话上下文失败:`, error)
       return {
         hasHistory: false,
         messageCount: 0,
@@ -845,9 +846,9 @@ export class Greet extends plugin {
       contextualInfo += `\n\n请根据这些历史对话信息，生成更有针对性和连续性的问候。可以询问之前聊天中提到的话题，或者自然地延续之前的对话内容。`
       
       greetingMessage += contextualInfo
-      console.log(`[定时问候] 为用户 ${targetQQ} 生成了包含上下文的个性化问候`)
+      logger.info(`[定时问候] 为用户 ${targetQQ} 生成了包含上下文的个性化问候`)
     } else {
-      console.log(`[定时问候] 用户 ${targetQQ} 无对话历史，使用标准问候模板`)
+      logger.info(`[定时问候] 用户 ${targetQQ} 无对话历史，使用标准问候模板`)
     }
     
     return greetingMessage
@@ -859,7 +860,7 @@ export class Greet extends plugin {
    * @param {string} status 状态 ('on' 或 'off')
    */
   setUserStatus(userId, status) {
-    console.log(`[定时问候] 设置用户 ${userId} 状态为：${status}`)
+    logger.info(`[定时问候] 设置用户 ${userId} 状态为：${status}`)
     this.userConfigs[userId] = status
     this.saveConfig()
   }
@@ -878,7 +879,7 @@ export class Greet extends plugin {
         
         // 检查用户是否在等待状态中
         if (this.messageWaitRecords[userId]) {
-          console.log(`[定时问候] 用户 ${userId} 在等待期间回复了消息，取消预定的询问问候`)
+          logger.info(`[定时问候] 用户 ${userId} 在等待期间回复了消息，取消预定的询问问候`)
           
           // 记录取消事件到日志
           this.addLogEntry({
@@ -912,14 +913,14 @@ export class Greet extends plugin {
 
     // 设置用户状态为开启
     this.setUserStatus(userId, 'on')
-    console.log(`[定时问候] 用户 ${userId} 发送 #开启定时问候 命令。`)
+    logger.info(`[定时问候] 用户 ${userId} 发送 #开启定时问候 命令。`)
 
     // 立即为当前发送命令的用户发送一条问候 (无视其他条件) - 已注释
     // const nowForMessage = new Date()
     // const currentTime = nowForMessage.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
     // const greetingMessage = this.greetingMessageTemplate.replace('{currentTime}', currentTime);
     // await this.sendActualGreeting(userId, greetingMessage)
-    // console.log(`[定时问候] 已向用户 ${userId} 立即发送问候 (通过 startGreeting 命令触发)。`)
+    // logger.info(`[定时问候] 已向用户 ${userId} 立即发送问候 (通过 startGreeting 命令触发)。`)
     // this.addLogEntry({
     //   type: 'greeting',
     //   action: 'immediateGreeting',
@@ -941,7 +942,7 @@ export class Greet extends plugin {
     } else {
       e.reply(`定时问候已开启`, true)
     }
-    console.log(`[定时问候] 用户 ${userId} 已成功处理开启命令。`)
+    logger.info(`[定时问候] 用户 ${userId} 已成功处理开启命令。`)
   }
 
   /**
@@ -949,21 +950,21 @@ export class Greet extends plugin {
    * @param {object} e 消息事件对象
    */
   async stopGreeting (e) {
-    console.log('[定时问候] 收到关闭定时问候命令。')
+    logger.info('[定时问候] 收到关闭定时问候命令。')
     const userId = e.sender.user_id.toString()
-    console.log(`[定时问候] 用户 ${userId} 发送 #关闭定时问候 命令。`)
+    logger.info(`[定时问候] 用户 ${userId} 发送 #关闭定时问候 命令。`)
 
     if (!this.isUserEnabled(userId)) {
       e.reply('您还没有开启定时问候功能', true)
-      console.log(`[定时问候] 用户 ${userId} 未开启，跳过关闭操作。`)
+      logger.info(`[定时问候] 用户 ${userId} 未开启，跳过关闭操作。`)
       return
     }
 
     this.setUserStatus(userId, 'off')
-    console.log(`[定时问候] 用户 ${userId} 已禁用定时问候。`)
+    logger.info(`[定时问候] 用户 ${userId} 已禁用定时问候。`)
     
     const enabledUsers = Object.values(this.userConfigs).filter(status => status === 'on')
-    console.log(`[定时问候] 剩余开启用户数：${enabledUsers.length}`)
+    logger.info(`[定时问候] 剩余开启用户数：${enabledUsers.length}`)
     
     // 注意：定时器系统保持运行，只是不会给关闭的用户发送消息
     // 如果需要完全停止系统，可以取消下面的注释
@@ -972,31 +973,31 @@ export class Greet extends plugin {
     //   if (this.scanInterval) {
     //     clearInterval(this.scanInterval);
     //     this.scanInterval = null;
-    //     console.log('[定时问候] 50秒扫描定时器已停止。');
+    //     logger.info('[定时问候] 50秒扫描定时器已停止。');
     //   }
     //   if (this.hourlyInterval) {
     //     clearInterval(this.hourlyInterval);
     //     this.hourlyInterval = null;
-    //     console.log('[定时问候] 每小时更新定时器已停止。');
+    //     logger.info('[定时问候] 每小时更新定时器已停止。');
     //   }
     //   // 清除心跳定时器
     //   if (this.heartbeatInterval) {
     //     clearInterval(this.heartbeatInterval);
     //     this.heartbeatInterval = null;
-    //     console.log('[定时问候] 清除了心跳日志定时器。');
+    //     logger.info('[定时问候] 清除了心跳日志定时器。');
     //   }
     //   this.bot = null // 清除机器人实例
     //   // 清空运行配置文件
     //   this.runConfig = {};
     //   this.saveRunConfig();
-    //   console.log('[定时问候] greet_run.json 已清空。');
+    //   logger.info('[定时问候] greet_run.json 已清空。');
     // } else {
-    //   console.log('[定时问候] 定时器系统仍在运行，因为仍有其他用户开启。')
+    //   logger.info('[定时问候] 定时器系统仍在运行，因为仍有其他用户开启。')
     // }
     
-    console.log('[定时问候] 定时器系统继续运行，但不会向您发送问候。');
+    logger.info('[定时问候] 定时器系统继续运行，但不会向您发送问候。');
     e.reply('定时问候已关闭', true) // 回复用户定时任务已关闭
-    console.log(`[定时问候] 用户 ${userId} 的定时问候已成功关闭。`)
+    logger.info(`[定时问候] 用户 ${userId} 的定时问候已成功关闭。`)
   }
 
   /**
@@ -1006,10 +1007,10 @@ export class Greet extends plugin {
    * @param {boolean} recordTime 是否记录本次发送的时间
    */
   async sendActualGreeting(targetQQ, message, recordTime = true) {
-    console.log(`[定时问候] 准备为QQ: ${targetQQ} 发送实际问候消息。`)
+    logger.info(`[定时问候] 准备为QQ: ${targetQQ} 发送实际问候消息。`)
 
     if (!this.bot) {
-      console.error("[定时问候] 机器人实例未设置，无法发送问候消息。")
+      logger.error("[定时问候] 机器人实例未设置，无法发送问候消息。")
       return
     }
     
@@ -1024,7 +1025,7 @@ export class Greet extends plugin {
         }
       }
     } catch (error) {
-      console.log(`[定时问候] 无法获取用户 ${targetQQ} 的详细信息，使用默认信息`)
+      logger.info(`[定时问候] 无法获取用户 ${targetQQ} 的详细信息，使用默认信息`)
     }
     
     // 模拟一个增强的事件对象 e，以符合 chat.js 中 abstractChat 方法的参数要求
@@ -1041,13 +1042,13 @@ export class Greet extends plugin {
       atBot: false, // 没有@机器人
       // 关键：重写 reply 方法，使其能够通过机器人实例发送私聊消息
       reply: async (msg, quote, data) => {
-        console.log(`[定时问候] DummyEvent Reply 触发，准备通过bot.pickFriend().sendMsg发送至 ${targetQQ}。`)
+        logger.info(`[定时问候] DummyEvent Reply 触发，准备通过bot.pickFriend().sendMsg发送至 ${targetQQ}。`)
         try {
           // 使用 this.bot.pickFriend(targetQQ).sendMsg(msg) 来发送私聊消息
           await this.bot.pickFriend(targetQQ).sendMsg(msg)
-          console.log(`[定时问候] 已通过bot.pickFriend().sendMsg发送消息至 ${targetQQ}: ${typeof msg === 'string' ? msg.substring(0, 100) : '[复杂消息]'}`)
+          logger.info(`[定时问候] 已通过bot.pickFriend().sendMsg发送消息至 ${targetQQ}: ${typeof msg === 'string' ? msg.substring(0, 100) : '[复杂消息]'}`)
         } catch (error) {
-          console.error(`[定时问候] 发送消息至 ${targetQQ} 失败:`, error)
+          logger.error(`[定时问候] 发送消息至 ${targetQQ} 失败:`, error)
         }
       },
       // 添加运行时处理器支持（如果需要的话）
@@ -1063,16 +1064,16 @@ export class Greet extends plugin {
     chat.e = dummyEvent // 显式设置 chatgpt 实例的 e 属性，确保 chat.js 内部的 this.e 有效
     try {
       await chat.abstractChat(dummyEvent, message, 'gemini')
-      console.log(`[定时问候] abstractChat 调用完成为 ${targetQQ}。`)
+      logger.info(`[定时问候] abstractChat 调用完成为 ${targetQQ}。`)
       
       // AI回复后，根据参数决定是否更新用户的消息时间
       if (recordTime) {
         this.startWaitTimerForUser(targetQQ)
       } else {
-        console.log(`[定时问候] 本次为等待问候，不记录机器人回复时间以避免循环。`)
+        logger.info(`[定时问候] 本次为等待问候，不记录机器人回复时间以避免循环。`)
       }
     } catch (error) {
-      console.error(`[定时问候] 调用 abstractChat 为 ${targetQQ} 时出错:`, error)
+      logger.error(`[定时问候] 调用 abstractChat 为 ${targetQQ} 时出错:`, error)
     }
   }
 

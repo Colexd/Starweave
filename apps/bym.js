@@ -1,14 +1,14 @@
 import { Config } from '../utils/config.js'
-import { getChatHistoryGroup } from '../utils/chat.js'
+// import { getChatHistoryGroup } from '../utils/chat.js'
 import { convertFaces } from '../utils/face.js'
 import { customSplitRegex, filterResponseChunk } from '../utils/text.js'
 import core, { roleMap } from '../model/core.js'
-import { formatDate } from '../utils/common.js'
+// import { formatDate } from '../utils/common.js'
 import { segment } from 'oicq'; // 已添加
 import path from 'path'; // 已添加
 import { fileURLToPath } from 'url'; // 已添加
-import fs from 'fs/promises'; // 新增：引入fs模块
-import fetch from 'node-fetch'; // 新增：引入node-fetch
+// import fs from 'fs/promises'; // 新增：引入fs模块
+// import fetch from 'node-fetch'; // 新增：引入node-fetch
 
 // 用于 ES 模块中的 __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -39,12 +39,13 @@ export class bym extends plugin {
 
   /** 复读 */
   async bym (e) {
+    // 检查消息是否已处理
     if (processedMessageIds.has(e.message_id)) {
       logger.info(`[BYM] 消息 ${e.message_id} 已处理，跳过。`);
       return false;
     }
     processedMessageIds.add(e.message_id);
-
+    // 检查 BYM 是否启用
     if (!Config.enableBYM) {
       return false
     }
@@ -57,7 +58,9 @@ export class bym extends plugin {
     let sender = e.sender.user_id
     let card = e.sender.card || e.sender.nickname
     let group = e.group_id
+    // 计算随机数
     let prop = Math.floor(Math.random() * 100)
+    // 检查助手标签
     if (Config.assistantLabel && e.msg?.includes(Config.assistantLabel)) {
       prop = -1
     }
@@ -85,6 +88,7 @@ export class bym extends plugin {
         `\n你的回复应该尽可能简练，像人类一样随意，不要附加任何奇怪的东西，如聊天记录的格式（比如${Config.assistantLabel}：），禁止重复聊天记录。
         如果仅叫了你“小绘"但是并没有@你的话，需要定时和语音的时候，你不输出[[定时 YY/MM/DD HH:MM:SS xxxxxx yyyyyy]]或者[[语音]]的格式，并告知用户你并没有被@不能使用定时或语音功能。`
 
+      // 处理用户消息
       let rsp = await core.sendMessage(e.msg, {}, Config.bymMode, e, {
         enableSmart: Config.smartMode,
         system: {
