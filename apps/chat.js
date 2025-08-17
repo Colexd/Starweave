@@ -663,6 +663,11 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
    * @returns {boolean} - 是否成功处理消息
    */
   async chatgpt (e) {///////////////////////////////////////////////////////////ChatGPT主要对话处理方法
+    // 新增：遇到转发消息直接不回复
+    if (e.message && Array.isArray(e.message) && e.message.find(seg => seg.type === 'forward')) {
+      logger.info(`转发消息，不回复`)
+      return false;
+    }
     let msg = e.msg || e.raw_message || ''; // 优先用 e.msg，如果没有则用 e.raw_message
     let prompt                 // 将要发送给AI的提示文本
     let forcePictureMode = false  // 是否强制使用图片模式回复
@@ -1655,72 +1660,58 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
         
         logger.info(`[ChatGPT Debug] 原始消息结构: ${JSON.stringify(originalMessage)}`)
         
-        // 提取被回复消息的文本内容
-        if (originalMessage.message && Array.isArray(originalMessage.message)) {
-          for (let segment of originalMessage.message) {
-            if (segment.type === 'text') {
-          replyText += segment.text;
-            } else if (segment.type === 'image') {
-          if (segment.url) {
-            replyText += `[[IMAGE_URL=${segment.url}]]`;
-            logger.info(`[ChatGPT Debug] 提取到引用图片URL: ${segment.url}`);
-          } else {
-            replyText += '[图片]';
-          }
-            } else if (segment.type === 'face') {
-          replyText += '[表情]';
-            } else if (segment.type === 'at') {
-          replyText += `@${segment.text || segment.qq}`;
-            } else if (segment.type === 'record') {
-          if (segment.url) {
-            replyText += `[[AUDIO_URL=${segment.url}]]`;
-            // logger.info(`[ChatGPT Debug] 提取到语音消息URL: ${segment.url}`);
-          } else {
-            replyText += '[语音]';
-          }
-            } else if (segment.type === 'video') {
-              if (segment.url) {
-                replyText += `[[VIDEO_URL=${segment.url}]]`;
-                logger.info(`[ChatGPT Debug] 提取到引用视频URL: ${segment.url}`);
-              } else {
-                replyText += '[视频]';
-              }
-            } else if (segment.type === 'file' && segment.file) {
-              // 新增：处理文件类型的消息段
-              // 尝试从 e.source 获取更完整的文件信息，包括 URL
-              if (e.source?.file?.url) {
-                try {
-                  const response = await fetch(e.source.file.url);
-                  if (response.ok) {
-                    const content = await response.text();
-                    let fileContent = '';
-                    if (content.length > 200) {
-                      fileContent = content.substring(0, 200);
-                      logger.info(`[Chat] 文件 ${e.source.file.name} 内容读取成功 (截取前200字符)。`);
-                    } else {
-                      fileContent = content;
-                      logger.info(`[Chat] 文件 ${e.source.file.name} 内容读取成功 (全文)。`);
+        // 提取被回复消息的文本内容，支持转发消息递归提取
+        function extractTextFromMessageArr(msgArr) {
+          let text = '';
+          for (let seg of msgArr) {
+            if (seg.type === 'text') {
+              text += seg.text;
+            } else if (seg.type === 'forward') {
+              // OneBot/NapCat: content 字段为数组，OICQ: message 字段为数组
+              if (Array.isArray(seg.content)) {
+                // 只平铺一层，不递归
+                text += '\n[转发消息内容]\n';
+                for (const item of seg.content) {
+                  let sender = item.sender?.nickname || item.sender?.card || item.sender?.user_id || '某用户';
+                  let msgText = '';
+                  if (Array.isArray(item.message)) {
+                    for (const m of item.message) {
+                      if (m.type === 'text') msgText += (m.data?.text || m.text || '');
                     }
-                    // 将文件内容直接加入 replyText
-                    replyText += `\n【以下是引用的文件'${e.source.file.name}'中的内容】：\n${fileContent}\n`;
-                  } else {
-                    logger.error(`[Chat] 下载文件 ${e.source.file.name} 失败，状态码: ${response.status}`);
-                    replyText += `[文件: ${segment.file}]`;
                   }
-                } catch (error) {
-                  logger.error(`[Chat] 读取或处理文件 ${e.source.file.name} 时出错:`, error);
-                  replyText += `[文件: ${segment.file}]`;
+                  text += `${sender}：${msgText}\n`;
                 }
-              } else {
-                logger.warn(`[Chat] 未能获取文件 ${segment.file} 的下载链接，仅记录文件名。`);
-                replyText += `[文件: ${segment.file}]`;
+                text += '\n';
+              } else if (Array.isArray(seg.message)) {
+                // OICQ兼容，递归一层
+                text += '\n[转发消息内容]\n';
+                for (const m of seg.message) {
+                  if (m.type === 'text') text += m.text + '\n';
+                }
+                text += '\n';
               }
+            } else if (seg.type === 'image' && seg.url) {
+              text += `[[IMAGE_URL=${seg.url}]]`;
+            } else if (seg.type === 'face') {
+              text += '[表情]';
+            } else if (seg.type === 'at') {
+              text += `@${seg.text || seg.qq}`;
+            } else if (seg.type === 'record' && seg.url) {
+              text += `[[AUDIO_URL=${seg.url}]]`;
+            } else if (seg.type === 'video' && seg.url) {
+              text += `[[VIDEO_URL=${seg.url}]]`;
+            } else if (seg.type === 'file' && seg.file) {
+              text += `[文件: ${seg.file}]`;
             }
           }
+          return text;
+        }
+        if (originalMessage.message && Array.isArray(originalMessage.message)) {
+          replyText = extractTextFromMessageArr(originalMessage.message);
         } else if (typeof originalMessage.raw_message === 'string') {
-          replyText = originalMessage.raw_message
+          replyText = originalMessage.raw_message;
         } else if (typeof originalMessage.message === 'string') {
-          replyText = originalMessage.message
+          replyText = originalMessage.message;
         }
         
         logger.info(`[ChatGPT Debug] 提取的回复文本: '${replyText}'`)
