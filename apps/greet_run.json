@@ -1,7 +1,7 @@
 {
-  "timestamp": "2025-08-06T08:00:00.051+08:00",
-  "randomMinute": 0,
-  "shouldSend": false,
-  "hour": 8,
-  "nextGreetingTime": null
+  "timestamp": "2025-08-18T10:35:01.616+08:00",
+  "randomMinute": 33,
+  "shouldSend": true,
+  "hour": 11,
+  "nextGreetingTime": "2025-08-18T11:33:00.000+08:00"
 }
