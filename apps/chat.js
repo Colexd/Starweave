@@ -1676,7 +1676,11 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
                   let msgText = '';
                   if (Array.isArray(item.message)) {
                     for (const m of item.message) {
-                      if (m.type === 'text') msgText += (m.data?.text || m.text || '');
+                      if (m.type === 'text') {
+                        msgText += (m.data?.text || m.text || '');
+                      } else if (m.type === 'image' && m.data?.url) {
+                        msgText += `[[IMAGE_URL=${m.data.url}]]`;
+                      }
                     }
                   }
                   text += `${sender}：${msgText}\n`;
@@ -1686,7 +1690,11 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
                 // OICQ兼容，递归一层
                 text += '\n[转发消息内容]\n';
                 for (const m of seg.message) {
-                  if (m.type === 'text') text += m.text + '\n';
+                  if (m.type === 'text') {
+                    text += m.text + '\n';
+                  } else if (m.type === 'image' && m.url) {
+                    text += `[[IMAGE_URL=${m.url}]]\n`;
+                  }
                 }
                 text += '\n';
               }
