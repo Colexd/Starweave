@@ -751,6 +751,7 @@ export class chatgpt extends plugin {///////////////////////////////////// * Cha
         return false
       }
       if (e.msg?.startsWith('#')) {
+        logger.info(`[ChatGPT] 检测到命令消息: ${e.msg}`);
         return false  // 忽略空消息或命令消息
       }
       

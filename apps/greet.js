@@ -488,8 +488,8 @@ export class Greet extends plugin {
         
         logger.info(`[定时问候] 用户 ${userId} 机器人最后回复时间: ${this.messageWaitRecords[userId]}, 已过 ${minutesDifference} 分钟, 等待阈值: ${randomWaitMinutes} 分钟`)
 
-        // 增加50%的概率检测
-        if (Math.random() < 0.5) {
+        // 增加80%的概率检测
+        if (Math.random() < 0.8) {
           if (minutesDifference >= randomWaitMinutes) {
             logger.info(`[定时问候] 用户 ${userId} 已经 ${minutesDifference} 分钟没有回复消息，准备发送询问消息`)
             

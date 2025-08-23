@@ -17,7 +17,7 @@ export class FishPlugin extends plugin {
             name: 'Fish TTS语音',
             dsc: 'Fish TTS',
             event: 'message',
-            priority: 100,
+            priority: -1000000,
             rule: [
                 {
                     reg: '^#语音\\s+(.+)$',
@@ -29,11 +29,13 @@ export class FishPlugin extends plugin {
                     fnc: 'showHelp'
                 },
                 {
-                    reg: '^#添加(fish)?key\\s*(.+)$',
+                    // MODIFIED: 修改指令正则，将 "#添加(fish)?key" 改为 "#fish添加key"
+                    reg: '^#fish添加key\\s*(.+)$',
                     fnc: 'addApiKey'
                 },
                 {
-                    reg: '^#添加(fish)?音色\\s*(.+)$',
+                    // MODIFIED: 修改指令正则，将 "#添加(fish)?音色" 改为 "#fish添加音色"
+                    reg: '^#fish添加音色\\s*(.+)$',
                     fnc: 'addVoice'
                 }
             ]
@@ -44,10 +46,11 @@ export class FishPlugin extends plugin {
     async showHelp(e) {
         const helpMsg = [
             'Fish TTS 语音同传 帮助：',
-            '1. #添加key [你的Fish API Key]',
-            '   示例: #添加key 8c80794fc7...',
-            '2. #添加音色 [音色ID]',
-            '   示例: #添加音色 625501a13e...',
+            // MODIFIED: 更新帮助文档中的指令示例
+            '1. #fish添加key [你的Fish API Key]',
+            '   示例: #fish添加key 8c80794fc7...',
+            '2. #fish添加音色 [音色ID]',
+            '   示例: #fish添加音色 625501a13e...',
             '3. 如何获取KEY和音色？(需使用该网站充值获得额度，最低1$）',
             '   https://fish.audio/zh-CN/go-api/billing/',
             '4. #语音 [要朗读的文本] (主人权限)',
@@ -61,17 +64,20 @@ export class FishPlugin extends plugin {
         const qq = String(e.user_id)
         if (!qq) return await e.reply('无法获取你的QQ号，操作失败')
 
-        // 使用正则的捕获组来获取key，更稳定
-        const match = e.msg.match(/^#添加(fish)?key\s*(.+)$/)
-        const apiKey = match[2].trim()
+        // MODIFIED: 更新用于提取key的正则表达式
+        const match = e.msg.match(/^#fish添加key\s*(.+)$/)
+        // NOTE: match[1] 将会是捕获组 (.+)，即key本身
+        const apiKey = match[1].trim()
 
         if (!apiKey) {
-            return await e.reply('Key不能为空，请按格式输入：#添加key [你的API Key]')
+            // MODIFIED: 更新错误提示信息
+            return await e.reply('Key不能为空，请按格式输入：#fish添加key [你的API Key]')
         }
 
         const filePath = path.join(__dirname, 'fish_key.json')
         const fishKeyMap = readJsonSafe(filePath)
         
+        // 此处直接赋值，即可实现对该用户旧数据的覆盖
         fishKeyMap[qq] = apiKey
 
         const success = writeJsonSafe(filePath, fishKeyMap)
@@ -87,16 +93,20 @@ export class FishPlugin extends plugin {
         const qq = String(e.user_id)
         if (!qq) return await e.reply('无法获取你的QQ号，操作失败')
 
-        const match = e.msg.match(/^#添加(fish)?音色\s*(.+)$/)
-        const voiceId = match[2].trim()
+        // MODIFIED: 更新用于提取音色ID的正则表达式
+        const match = e.msg.match(/^#fish添加音色\s*(.+)$/)
+        // NOTE: match[1] 将会是捕获组 (.+)，即音色ID本身
+        const voiceId = match[1].trim()
 
         if (!voiceId) {
-            return await e.reply('音色ID不能为空，请按格式输入：#添加音色 [音色ID]')
+            // MODIFIED: 更新错误提示信息
+            return await e.reply('音色ID不能为空，请按格式输入：#fish添加音色 [音色ID]')
         }
 
         const filePath = path.join(__dirname, 'fish_audio.json')
         const fishAudioMap = readJsonSafe(filePath)
 
+        // 此处直接赋值，即可实现对该用户旧数据的覆盖
         fishAudioMap[qq] = voiceId
 
         const success = writeJsonSafe(filePath, fishAudioMap)
@@ -137,7 +147,7 @@ export class FishPlugin extends plugin {
         logger.info('[Fish调试] 选用的voiceRef:', voiceRef)
 
         if (!apiKey) {
-            await e.reply('你尚未配置Fish API Key，请使用指令：#添加key [你的Key]')
+            await e.reply('你尚未配置Fish API Key，请使用指令：#fish添加key [你的Key]')
             return
         }
 
@@ -225,7 +235,8 @@ export class FishPlugin extends plugin {
         lines.push(`Fish API Key: ${apiKey ? '已配置' : '未配置'}`)
         lines.push(`当前音色ID: ${currentVoice.speaker || '未配置'}`)
         lines.push(`音色模型类型: ${modelType}`)
-        lines.push(`\n配置指令: #添加key [你的key] | #添加音色 [音色ID]`)
+        // MODIFIED: 更新配置指令的帮助说明
+        lines.push(`\n配置指令: #fish添加key [你的key] | #fish添加音色 [音色ID]`)
 
         await e.reply(['当前 Fish 配置：', ...lines].join('\n'))
     }
@@ -308,7 +319,7 @@ export async function FishGenerateAudio(e, txt) {
     logger.info('[Fish调试] 选用的voiceRef:', voiceRef)
 
     if (!apiKey) {
-        await e.reply('你尚未配置Fish API Key，请使用指令：#添加key [你的Key]')
+        await e.reply('你尚未配置Fish API Key，请使用指令：#fish添加key [你的Key]')
         return
     }
 

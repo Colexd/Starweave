@@ -3,6 +3,7 @@ import * as GoogleGeminiClientModule from './GoogleGeminiClient.js'
 import { newFetch } from '../utils/proxy.js'
 import _ from 'lodash'
 import { Config } from '../utils/config.js'
+// import { logger } from '../utils/logger.js'
 
 const BASEURL = 'https://generativelanguage.googleapis.com'
 
@@ -90,6 +91,11 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
     this.baseUrl = props.baseUrl || BASEURL
     this.supportFunction = true
     this.debug = props.debug
+    if (Array.isArray(props.key)) {
+      this._keys = props.key;
+      this._keyIndex = 0;
+      this._key = this._keys[this._keyIndex];
+    }
   }
 
   /**
@@ -116,8 +122,8 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
    * @returns {Promise<{conversationId: string?, parentMessageId: string, text: string, id: string}>}
    */
   async sendMessage (text, opt = {}) {
-    const maxRetries = Config.gemini?.retries ?? 3;
-    const requestTimeout = 120000; // 从配置读取超时，默认120秒
+    const maxRetries = 5;
+    const requestTimeout = 300000; // 从配置读取超时，默认300秒
     let lastError;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -125,16 +131,28 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
         return await this.attemptSendMessage(text, opt, requestTimeout);
       } catch (error) {
         lastError = error;
-        // 只对网络超时和5xx系列错误进行重试
-        if (error.name === 'AbortError' || (error.message && error.message.startsWith('API请求失败: 5'))) {
-          logger.warn(`[Gemini Client] 第 ${attempt} 次请求失败 (超时或服务器错误): ${error.message}`);
+        // 只对网络超时、5xx系列错误、JSON解析失败、无效API响应、内容为空或被安全策略拦截、以及MALFORMED_FUNCTION_CALL进行重试
+        const isRetryableError = 
+          error.name === 'AbortError' || 
+          (error.message && error.message.startsWith('API请求失败: 5')) ||
+          (error.message && error.message.startsWith('JSON解析失败')) ||
+          (error.message && error.message.startsWith('API返回无效响应')) ||
+          (error.message && error.message.startsWith('API返回的content为空')) ||
+          (error.message && error.message.startsWith('API返回内容被安全策略拦截')) ||
+          (error.message && error.message.startsWith('MALFORMED_FUNCTION_CALL'));
+
+        // if (isRetryableError) {
+        if (true) {
+          this._rotateKey();
+          logger.warn(`[Gemini Client] 第 ${attempt} 次请求失败 (可重试错误): ${error.message}`);
           if (attempt < maxRetries) {
-            const delay = Math.pow(2, attempt - 1) * 1000; // 指数退避
+            const delay = Math.pow(2, attempt - 1) * 100; // 指数退避
             logger.info(`[Gemini Client] 将在 ${delay / 1000} 秒后重试...`);
             await new Promise(resolve => setTimeout(resolve, delay));
           }
         } else {
-          // 对于其他错误（如4xx客户端错误），不重试，直接抛出
+          // 对于其他错误（如4xx客户端错误或函数执行错误），不重试，直接抛出
+          logger.error(`[Gemini Client] 第 ${attempt} 次请求失败 (不可重试错误): ${error.message}`);
           throw lastError;
         }
       }
@@ -142,6 +160,14 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
 
     logger.error(`[Gemini Client] 所有 ${maxRetries} 次重试均失败。`);
     throw lastError;
+  }
+
+  _rotateKey() {
+    if (this._keys && this._keys.length > 1) {
+      this._keyIndex = (this._keyIndex + 1) % this._keys.length;
+      this._key = this._keys[this._keyIndex];
+      logger.info(`[Gemini Client] Rotated to new API key index: ${this._keyIndex}`);
+    }
   }
 
   async attemptSendMessage(text, opt = {}, timeout) {
@@ -283,7 +309,7 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
     if (this.debug) {
       console.debug(JSON.stringify(body))
     }
-
+    console.log(`[Gemini Client] Using API key: ${this._key}`);
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
@@ -309,10 +335,17 @@ export class CustomGoogleGeminiClient extends GoogleGeminiClientModule.GoogleGem
     }
     
     if (result.status !== 200) {
-      const errorText = await result.text()
-      console.error(`[Gemini] API请求失败，状态码: ${result.status}, 错误信息: ${errorText}`)
+      let errorText = await result.text();
+      let errorMessageToLog = errorText;
+
+      // 如果是 5xx 错误且响应体为空，提供一个默认的描述性信息
+      if (result.status >= 500 && result.status < 600 && !errorText.trim()) {
+        errorMessageToLog = '服务器内部错误或网关超时';
+      }
+
+      console.error(`[Gemini] API请求失败，状态码: ${result.status}, 错误信息: ${errorMessageToLog}`);
       // 抛出包含状态码的错误，以便重试逻辑可以捕获
-      throw new Error(`API请求失败: ${result.status} - ${errorText}`)
+      throw new Error(`API请求失败: ${result.status} - ${errorMessageToLog}`);
     }
     
     let response
